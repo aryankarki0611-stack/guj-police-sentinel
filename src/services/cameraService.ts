@@ -3,12 +3,12 @@ import { cameras, detections, type Camera, type CameraStatus } from "@/data/mock
 import { respond } from "./api";
 
 export interface CameraFilters {
-  query?: string;
-  department?: string;
-  district?: string;
-  status?: CameraStatus | "all";
-  type?: string;
-  vmsSource?: string;
+  query?: string | undefined;
+  department?: string | undefined;
+  district?: string | undefined;
+  status?: CameraStatus | "all" | undefined;
+  type?: string | undefined;
+  vmsSource?: string | undefined;
 }
 
 export const cameraService = {

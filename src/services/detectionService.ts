@@ -3,14 +3,14 @@ import { detections, type Detection } from "@/data/mock";
 import { respond } from "./api";
 
 export interface DetectionFilters {
-  plate?: string;
-  vehicleType?: string;
-  color?: string;
-  cameraId?: string;
-  location?: string;
-  from?: string;
-  to?: string;
-  minConfidence?: number;
+  plate?: string | undefined;
+  vehicleType?: string | undefined;
+  color?: string | undefined;
+  cameraId?: string | undefined;
+  location?: string | undefined;
+  from?: string | undefined;
+  to?: string | undefined;
+  minConfidence?: number | undefined;
 }
 
 export function filterDetections(filters: DetectionFilters): Detection[] {
