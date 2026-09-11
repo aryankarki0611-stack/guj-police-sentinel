@@ -10,33 +10,167 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AlertsRouteImport } from './routes/alerts'
+import { Route as AuditRouteImport } from './routes/audit'
+import { Route as CamerasRouteImport } from './routes/cameras'
+import { Route as InvestigationRouteImport } from './routes/investigation'
+import { Route as SystemRouteImport } from './routes/system'
+import { Route as VehicleSearchRouteImport } from './routes/vehicle-search'
+import { Route as CasesIndexRouteImport } from './routes/cases.index'
+import { Route as CasesCaseIdRouteImport } from './routes/cases.$caseId'
+import { Route as EvidenceIndexRouteImport } from './routes/evidence.index'
+import { Route as EvidenceEvidenceIdRouteImport } from './routes/evidence.$evidenceId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AlertsRoute = AlertsRouteImport.update({
+  id: '/alerts',
+  path: '/alerts',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AuditRoute = AuditRouteImport.update({
+  id: '/audit',
+  path: '/audit',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CamerasRoute = CamerasRouteImport.update({
+  id: '/cameras',
+  path: '/cameras',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InvestigationRoute = InvestigationRouteImport.update({
+  id: '/investigation',
+  path: '/investigation',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SystemRoute = SystemRouteImport.update({
+  id: '/system',
+  path: '/system',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const VehicleSearchRoute = VehicleSearchRouteImport.update({
+  id: '/vehicle-search',
+  path: '/vehicle-search',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CasesIndexRoute = CasesIndexRouteImport.update({
+  id: '/cases/',
+  path: '/cases/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CasesCaseIdRoute = CasesCaseIdRouteImport.update({
+  id: '/cases/$caseId',
+  path: '/cases/$caseId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EvidenceIndexRoute = EvidenceIndexRouteImport.update({
+  id: '/evidence/',
+  path: '/evidence/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EvidenceEvidenceIdRoute = EvidenceEvidenceIdRouteImport.update({
+  id: '/evidence/$evidenceId',
+  path: '/evidence/$evidenceId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/alerts': typeof AlertsRoute
+  '/audit': typeof AuditRoute
+  '/cameras': typeof CamerasRoute
+  '/investigation': typeof InvestigationRoute
+  '/system': typeof SystemRoute
+  '/vehicle-search': typeof VehicleSearchRoute
+  '/cases/$caseId': typeof CasesCaseIdRoute
+  '/evidence/$evidenceId': typeof EvidenceEvidenceIdRoute
+  '/cases/': typeof CasesIndexRoute
+  '/evidence/': typeof EvidenceIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/alerts': typeof AlertsRoute
+  '/audit': typeof AuditRoute
+  '/cameras': typeof CamerasRoute
+  '/investigation': typeof InvestigationRoute
+  '/system': typeof SystemRoute
+  '/vehicle-search': typeof VehicleSearchRoute
+  '/cases/$caseId': typeof CasesCaseIdRoute
+  '/evidence/$evidenceId': typeof EvidenceEvidenceIdRoute
+  '/cases': typeof CasesIndexRoute
+  '/evidence': typeof EvidenceIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/alerts': typeof AlertsRoute
+  '/audit': typeof AuditRoute
+  '/cameras': typeof CamerasRoute
+  '/investigation': typeof InvestigationRoute
+  '/system': typeof SystemRoute
+  '/vehicle-search': typeof VehicleSearchRoute
+  '/cases/$caseId': typeof CasesCaseIdRoute
+  '/evidence/$evidenceId': typeof EvidenceEvidenceIdRoute
+  '/cases/': typeof CasesIndexRoute
+  '/evidence/': typeof EvidenceIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/alerts'
+    | '/audit'
+    | '/cameras'
+    | '/investigation'
+    | '/system'
+    | '/vehicle-search'
+    | '/cases/$caseId'
+    | '/evidence/$evidenceId'
+    | '/cases/'
+    | '/evidence/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/alerts'
+    | '/audit'
+    | '/cameras'
+    | '/investigation'
+    | '/system'
+    | '/vehicle-search'
+    | '/cases/$caseId'
+    | '/evidence/$evidenceId'
+    | '/cases'
+    | '/evidence'
+  id:
+    | '__root__'
+    | '/'
+    | '/alerts'
+    | '/audit'
+    | '/cameras'
+    | '/investigation'
+    | '/system'
+    | '/vehicle-search'
+    | '/cases/$caseId'
+    | '/evidence/$evidenceId'
+    | '/cases/'
+    | '/evidence/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AlertsRoute: typeof AlertsRoute
+  AuditRoute: typeof AuditRoute
+  CamerasRoute: typeof CamerasRoute
+  InvestigationRoute: typeof InvestigationRoute
+  SystemRoute: typeof SystemRoute
+  VehicleSearchRoute: typeof VehicleSearchRoute
+  CasesCaseIdRoute: typeof CasesCaseIdRoute
+  EvidenceEvidenceIdRoute: typeof EvidenceEvidenceIdRoute
+  CasesIndexRoute: typeof CasesIndexRoute
+  EvidenceIndexRoute: typeof EvidenceIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +182,91 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/alerts': {
+      id: '/alerts'
+      path: '/alerts'
+      fullPath: '/alerts'
+      preLoaderRoute: typeof AlertsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/audit': {
+      id: '/audit'
+      path: '/audit'
+      fullPath: '/audit'
+      preLoaderRoute: typeof AuditRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cameras': {
+      id: '/cameras'
+      path: '/cameras'
+      fullPath: '/cameras'
+      preLoaderRoute: typeof CamerasRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/investigation': {
+      id: '/investigation'
+      path: '/investigation'
+      fullPath: '/investigation'
+      preLoaderRoute: typeof InvestigationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/system': {
+      id: '/system'
+      path: '/system'
+      fullPath: '/system'
+      preLoaderRoute: typeof SystemRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/vehicle-search': {
+      id: '/vehicle-search'
+      path: '/vehicle-search'
+      fullPath: '/vehicle-search'
+      preLoaderRoute: typeof VehicleSearchRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cases/': {
+      id: '/cases/'
+      path: '/cases'
+      fullPath: '/cases/'
+      preLoaderRoute: typeof CasesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cases/$caseId': {
+      id: '/cases/$caseId'
+      path: '/cases/$caseId'
+      fullPath: '/cases/$caseId'
+      preLoaderRoute: typeof CasesCaseIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/evidence/': {
+      id: '/evidence/'
+      path: '/evidence'
+      fullPath: '/evidence/'
+      preLoaderRoute: typeof EvidenceIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/evidence/$evidenceId': {
+      id: '/evidence/$evidenceId'
+      path: '/evidence/$evidenceId'
+      fullPath: '/evidence/$evidenceId'
+      preLoaderRoute: typeof EvidenceEvidenceIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AlertsRoute: AlertsRoute,
+  AuditRoute: AuditRoute,
+  CamerasRoute: CamerasRoute,
+  InvestigationRoute: InvestigationRoute,
+  SystemRoute: SystemRoute,
+  VehicleSearchRoute: VehicleSearchRoute,
+  CasesCaseIdRoute: CasesCaseIdRoute,
+  EvidenceEvidenceIdRoute: EvidenceEvidenceIdRoute,
+  CasesIndexRoute: CasesIndexRoute,
+  EvidenceIndexRoute: EvidenceIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
