@@ -10,33 +10,53 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as CamerasRouteImport } from './routes/cameras'
+import { Route as InvestigationRouteImport } from './routes/investigation'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CamerasRoute = CamerasRouteImport.update({
+  id: '/cameras',
+  path: '/cameras',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InvestigationRoute = InvestigationRouteImport.update({
+  id: '/investigation',
+  path: '/investigation',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/cameras': typeof CamerasRoute
+  '/investigation': typeof InvestigationRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/cameras': typeof CamerasRoute
+  '/investigation': typeof InvestigationRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/cameras': typeof CamerasRoute
+  '/investigation': typeof InvestigationRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths: '/' | '/cameras' | '/investigation'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to: '/' | '/cameras' | '/investigation'
+  id: '__root__' | '/' | '/cameras' | '/investigation'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  CamerasRoute: typeof CamerasRoute
+  InvestigationRoute: typeof InvestigationRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +68,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/cameras': {
+      id: '/cameras'
+      path: '/cameras'
+      fullPath: '/cameras'
+      preLoaderRoute: typeof CamerasRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/investigation': {
+      id: '/investigation'
+      path: '/investigation'
+      fullPath: '/investigation'
+      preLoaderRoute: typeof InvestigationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  CamerasRoute: CamerasRoute,
+  InvestigationRoute: InvestigationRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
