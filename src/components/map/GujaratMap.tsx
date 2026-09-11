@@ -10,7 +10,7 @@ const H = 720;
 export function project(p: GeoPoint) {
   const x = ((p.lng - BOUNDS.minLng) / (BOUNDS.maxLng - BOUNDS.minLng)) * W;
   const y = ((BOUNDS.maxLat - p.lat) / (BOUNDS.maxLat - BOUNDS.minLat)) * H;
-  return { x, y };
+  return { x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 };
 }
 
 // Simplified state silhouette (decorative reference outline).
