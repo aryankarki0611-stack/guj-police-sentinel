@@ -158,7 +158,7 @@ function rand(seed: number) {
   return x - Math.floor(x);
 }
 function pick<T>(arr: T[], seed: number): T {
-  return arr[Math.floor(rand(seed) * arr.length) % arr.length];
+  return arr[Math.floor(rand(seed) * arr.length) % arr.length]!;
 }
 function pad(n: number, len = 2) {
   return String(n).padStart(len, "0");
@@ -184,7 +184,7 @@ const ATTENTION_CAMS = [4, 18, 38];
 
 export const cameras: Camera[] = Array.from({ length: 50 }, (_, i) => {
   const n = i + 1;
-  const city = GUJARAT_CITIES[i % GUJARAT_CITIES.length];
+  const city = GUJARAT_CITIES[i % GUJARAT_CITIES.length]!;
   const jitter = (s: number) => (rand(s) - 0.5) * 0.16;
   const status: CameraStatus = OFFLINE_CAMS.includes(n)
     ? "offline"
@@ -210,7 +210,7 @@ export const cameras: Camera[] = Array.from({ length: 50 }, (_, i) => {
 
 export const cameraCity = (cameraId: string) => {
   const cam = cameras.find((c) => c.id === cameraId);
-  return cam ? cam.location.split(" — ")[0] : "Unknown";
+  return cam ? cam.location.split(" — ")[0]! : "Unknown";
 };
 
 /* ------------------------------------------------------------------ */
@@ -258,7 +258,7 @@ const secondaryDetections: Detection[] = secondaryLegs.map((leg, idx) => ({
 }));
 
 const backgroundDetections: Detection[] = Array.from({ length: 220 }, (_, i) => {
-  const cam = cameras[Math.floor(rand(i * 3.11) * cameras.length)];
+  const cam = cameras[Math.floor(rand(i * 3.11) * cameras.length)]!;
   const hour = 6 + Math.floor(rand(i * 1.7) * 16);
   const minute = Math.floor(rand(i * 2.9) * 60);
   return {
@@ -527,7 +527,7 @@ export const auditEntries: AuditEntry[] = auditSeed.map((s, i) => {
   };
 });
 
-export const AUDIT_CHAIN_TIP = auditEntries[auditEntries.length - 1].entry;
+export const AUDIT_CHAIN_TIP = auditEntries[auditEntries.length - 1]!.entry;
 
 /* ------------------------------------------------------------------ */
 /* System status                                                       */
