@@ -42,7 +42,9 @@ export function Sidebar() {
           <ShieldHalf className="h-5 w-5 text-primary" />
         </div>
         <div className="min-w-0">
-          <p className="text-base font-bold tracking-[0.18em] text-foreground">SENTINEL</p>
+          <p className="text-base font-bold tracking-[0.18em] text-foreground">
+            SENTINEL
+          </p>
           <p className="truncate text-[10px] uppercase tracking-wide text-muted-foreground">
             Gujarat Police Hackathon 2026
           </p>
@@ -56,10 +58,15 @@ export function Sidebar() {
             <li key={item.to}>
               <Link
                 to={item.to}
-                activeOptions={{ exact: "exact" in item ? item.exact : false }}
+                activeOptions={{
+                  exact: "exact" in item ? item.exact : false,
+                }}
                 className="flex items-center gap-2.5 rounded-sm px-2.5 py-2 text-sm text-sidebar-foreground transition-colors hover:bg-sidebar-accent data-[status=active]:border-l-2 data-[status=active]:border-primary data-[status=active]:bg-sidebar-accent data-[status=active]:font-semibold data-[status=active]:text-foreground"
               >
-                <item.icon className="h-4 w-4 shrink-0" strokeWidth={1.8} />
+                <item.icon
+                  className="h-4 w-4 shrink-0"
+                  strokeWidth={1.8}
+                />
                 {item.label}
               </Link>
             </li>
@@ -75,12 +82,14 @@ export function Sidebar() {
             Operational
           </span>
         </div>
+
         <div className="flex items-center justify-between">
           <span className="label-caps">Cameras online</span>
           <span className="font-mono text-foreground">
             {systemStatus.camerasOnline}/{systemStatus.camerasTotal}
           </span>
         </div>
+
         <div className="flex items-center justify-between">
           <span className="label-caps">Last updated</span>
           <LiveClock className="font-mono text-foreground" />
