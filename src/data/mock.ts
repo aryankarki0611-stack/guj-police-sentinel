@@ -257,16 +257,65 @@ const secondaryDetections: Detection[] = secondaryLegs.map((leg, idx) => ({
   frameRef: `frame_${leg.cameraId}_${leg.hour}${pad(leg.minute)}`,
 }));
 
-const backgroundDetections: Detection[] = Array.from({ length: 220 }, (_, i) => {
+// Watchlist detections referenced by alerts / evidence records.
+const watchlistDetections: Detection[] = [
+  {
+    id: "DET-01005",
+    cameraId: "CAM-033",
+    location: "Mehsana",
+    timestamp: ts(8, 21, 44),
+    plate: "GJ18EF4421",
+    vehicleType: "Truck",
+    color: "Blue",
+    confidence: 0.91,
+    direction: "Westbound",
+    frameRef: "frame_CAM-033_0821",
+  },
+  {
+    id: "DET-01021",
+    cameraId: "CAM-018",
+    location: "Gandhinagar",
+    timestamp: ts(7, 55, 12),
+    plate: "GJ18EF4421",
+    vehicleType: "Truck",
+    color: "Blue",
+    confidence: 0.83,
+    direction: "Westbound",
+    frameRef: "frame_CAM-018_0755",
+  },
+  {
+    id: "DET-01012",
+    cameraId: "CAM-045",
+    location: "Valsad",
+    timestamp: ts(7, 12, 18),
+    plate: "GJ06XY9123",
+    vehicleType: "Motorcycle",
+    color: "Red",
+    confidence: 0.61,
+    direction: "Southbound",
+    frameRef: "frame_CAM-045_0712",
+  },
+];
+
+// Background traffic uses its own plate pool so demo plates stay uncluttered.
+const LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+const backgroundPlates = Array.from({ length: 70 }, (_, i) => {
+  const l = (s: number) => LETTERS[Math.floor(rand(s) * LETTERS.length)]!;
+  const digits = 1000 + Math.floor(rand(i * 7.7) * 8999);
+  const rtoCode = pad(1 + Math.floor(rand(i * 2.1) * 38));
+  return `GJ${rtoCode}${l(i * 1.4)}${l(i * 3.6)}${digits}`;
+}).filter((p) => !PLATES.includes(p));
+
+const backgroundDetections: Detection[] = Array.from({ length: 240 }, (_, i) => {
   const cam = cameras[Math.floor(rand(i * 3.11) * cameras.length)]!;
   const hour = 6 + Math.floor(rand(i * 1.7) * 16);
   const minute = Math.floor(rand(i * 2.9) * 60);
   return {
-    id: `DET-${pad(1000 + i, 5)}`,
+    id: `DET-${pad(2000 + i, 5)}`,
     cameraId: cam.id,
     location: cameraCity(cam.id),
     timestamp: ts(hour, minute, Math.floor(rand(i * 5.5) * 60)),
-    plate: pick(PLATES, i * 6.3),
+    plate: pick(backgroundPlates, i * 6.3),
     vehicleType: pick(VEHICLE_TYPES, i * 8.1),
     color: pick(VEHICLE_COLORS, i * 9.7),
     confidence: 0.72 + rand(i * 4.4) * 0.26,
@@ -278,6 +327,7 @@ const backgroundDetections: Detection[] = Array.from({ length: 220 }, (_, i) => 
 export const detections: Detection[] = [
   ...journeyDetections,
   ...secondaryDetections,
+  ...watchlistDetections,
   ...backgroundDetections,
 ].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
 
