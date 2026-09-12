@@ -71,9 +71,21 @@ export function GujaratMap({
       .join(" ");
   }, [route]);
 
+  // When a route is shown, zoom the view to the area it covers.
+  const viewBox = useMemo(() => {
+    if (!route?.length) return `0 0 ${W} ${H}`;
+    const pts = route.map((p) => project(p.coords));
+    const pad = 170;
+    const minX = Math.max(0, Math.min(...pts.map((p) => p.x)) - pad);
+    const maxX = Math.min(W, Math.max(...pts.map((p) => p.x)) + pad * 1.6);
+    const minY = Math.max(0, Math.min(...pts.map((p) => p.y)) - pad);
+    const maxY = Math.min(H, Math.max(...pts.map((p) => p.y)) + pad);
+    return `${minX.toFixed(1)} ${minY.toFixed(1)} ${(maxX - minX).toFixed(1)} ${(maxY - minY).toFixed(1)}`;
+  }, [route]);
+
   return (
     <div className={cn("relative overflow-hidden rounded-md border border-border bg-[oklch(0.17_0.02_258)]", className)}>
-      <svg viewBox={`0 0 ${W} ${H}`} className="h-full w-full" role="img" aria-label="Gujarat camera map">
+      <svg viewBox={viewBox} className="h-full w-full" role="img" aria-label="Gujarat camera map">
         <defs>
           <pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">
             <path d="M50 0 L0 0 0 50" fill="none" stroke="var(--color-grid-line)" strokeWidth="0.8" />
