@@ -103,6 +103,34 @@ export interface AuditEntry {
   payload: Record<string, string | number>;
 }
 
+export type IntegrationProtocol = "RTSP" | "ONVIF" | "Vendor API" | "Existing VMS";
+
+export interface IntegrationSource {
+  id: string;
+  department: string;
+  status: "Connected" | "Attention";
+  vms: string;
+  cameras: number;
+  protocols: IntegrationProtocol[];
+  lastSync: string;
+}
+
+export interface JourneyTransition {
+  id: string;
+  plate: string;
+  fromCameraId: string;
+  fromLocation: string;
+  fromTime: string;
+  toCameraId: string;
+  toLocation: string;
+  toTime: string;
+  distanceKm: number;
+  expectedMinutes: number;
+  observedMinutes: number;
+  status: "plausible" | "review";
+  reasons: string[];
+}
+
 /* ------------------------------------------------------------------ */
 /* Reference geography                                                 */
 /* ------------------------------------------------------------------ */
@@ -330,6 +358,26 @@ export const detections: Detection[] = [
   ...watchlistDetections,
   ...backgroundDetections,
 ].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+
+export const integrationSources: IntegrationSource[] = [
+  { id: "INT-HOME", department: "Home Department", status: "Connected", vms: "Vendor A VMS", cameras: 18, protocols: ["ONVIF", "RTSP", "Existing VMS"], lastSync: "12 sec ago" },
+  { id: "INT-RTO", department: "RTO", status: "Connected", vms: "Vendor B VMS", cameras: 12, protocols: ["Vendor API", "RTSP"], lastSync: "28 sec ago" },
+  { id: "INT-FCS", department: "Food & Civil Supplies", status: "Connected", vms: "Vendor C VMS", cameras: 8, protocols: ["Existing VMS", "ONVIF"], lastSync: "41 sec ago" },
+  { id: "INT-OTHER", department: "Other Government Sources", status: "Connected", vms: "3 federated sources", cameras: 12, protocols: ["RTSP", "ONVIF", "Vendor API"], lastSync: "36 sec ago" },
+];
+
+export const onboardingCameras = [
+  { cameraId: "CAM-021", department: "Home Department", location: "Gandhinagar", vmsSource: "Vendor A VMS", protocol: "ONVIF" as const, status: "Connected" as const },
+  { cameraId: "CAM-014", department: "RTO", location: "Ahmedabad", vmsSource: "Vendor B VMS", protocol: "Vendor API" as const, status: "Connected" as const },
+  { cameraId: "CAM-033", department: "Food & Civil Supplies", location: "Mehsana", vmsSource: "Vendor C VMS", protocol: "Existing VMS" as const, status: "Connected" as const },
+  { cameraId: "CAM-041", department: "Other Government Sources", location: "Palanpur", vmsSource: "Federated gateway", protocol: "RTSP" as const, status: "Connected" as const },
+];
+
+export const journeyTransitions: JourneyTransition[] = [
+  { id: "TRN-014-021-REVIEW", plate: "GJ01AB1234", fromCameraId: "CAM-014", fromLocation: "Ahmedabad", fromTime: ts(10, 32, 12), toCameraId: "CAM-021", toLocation: "Gandhinagar", toTime: ts(10, 35, 12), distanceKm: 28, expectedMinutes: 18, observedMinutes: 3, status: "review", reasons: ["Possible OCR error", "Possible false vehicle association", "Duplicate or incorrect detection", "Possible timestamp problem"] },
+  { id: "TRN-021-033", plate: "GJ01AB1234", fromCameraId: "CAM-021", fromLocation: "Gandhinagar", fromTime: ts(10, 51, 12), toCameraId: "CAM-033", toLocation: "Mehsana", toTime: ts(11, 42, 12), distanceKm: 42, expectedMinutes: 45, observedMinutes: 51, status: "plausible", reasons: ["Observed interval meets the graph-constrained minimum travel time"] },
+  { id: "TRN-033-041", plate: "GJ01AB1234", fromCameraId: "CAM-033", fromLocation: "Mehsana", fromTime: ts(11, 42, 12), toCameraId: "CAM-041", toLocation: "Palanpur", toTime: ts(12, 36, 33), distanceKm: 71, expectedMinutes: 50, observedMinutes: 54, status: "plausible", reasons: ["Observed interval meets the graph-constrained minimum travel time"] },
+];
 
 /* ------------------------------------------------------------------ */
 /* Alerts                                                              */
