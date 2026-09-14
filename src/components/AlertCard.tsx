@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { ChevronDown, Check, X, FolderPlus } from "lucide-react";
+import { ChevronDown, Check, X, FolderPlus, ScanLine, UserCheck, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge, type Tone } from "@/components/StatusBadge";
 import type { Alert } from "@/data/mock";
@@ -45,6 +45,17 @@ export function AlertCard({ alert, compact = false, onVerify, onDismiss, onCreat
         </div>
       </div>
 
+      <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+        <div className="rounded-sm border border-primary/30 bg-primary/10 p-2">
+          <p className="flex items-center gap-1.5 font-semibold text-primary"><ScanLine className="h-3.5 w-3.5" /> AI-detected</p>
+          <p className="mt-1 text-muted-foreground">Plate-read candidate · {pct(alert.confidence)}</p>
+        </div>
+        <div className="rounded-sm border border-border bg-surface-raised p-2">
+          <p className="flex items-center gap-1.5 font-semibold text-foreground"><UserCheck className="h-3.5 w-3.5" /> Officer decision</p>
+          <p className="mt-1 uppercase text-muted-foreground">{alert.state === "open" ? "Pending review" : alert.state}</p>
+        </div>
+      </div>
+
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
@@ -57,7 +68,7 @@ export function AlertCard({ alert, compact = false, onVerify, onDismiss, onCreat
         <ul className="mt-2 space-y-1.5 rounded-sm border border-border bg-surface-raised p-3 text-xs">
           {alert.reasoning.map((r) => (
             <li key={r} className="flex gap-2 text-foreground">
-              <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ok" />
+              {r.toLowerCase().includes("review") ? <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn" /> : <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ok" />}
               <span>{r}</span>
             </li>
           ))}
@@ -74,6 +85,13 @@ export function AlertCard({ alert, compact = false, onVerify, onDismiss, onCreat
             View investigation
           </Link>
         </Button>
+        {alert.plate !== "—" ? (
+          <Button asChild size="sm" variant="outline">
+            <Link to="/journey-validation" search={{ plate: alert.plate }}>
+              Validate journey
+            </Link>
+          </Button>
+        ) : null}
         {!compact && alert.state === "open" ? (
           <>
             <Button size="sm" variant="outline" onClick={() => onVerify?.(alert)}>
