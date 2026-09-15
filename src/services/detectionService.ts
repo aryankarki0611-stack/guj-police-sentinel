@@ -1,40 +1,146 @@
-// GET /detections
-import { detections, type Detection } from "@/data/mock";
-import { respond } from "./api";
+import { supabase } from "@/lib/supabase";
 
 export interface DetectionFilters {
-  plate?: string | undefined;
-  vehicleType?: string | undefined;
-  color?: string | undefined;
-  cameraId?: string | undefined;
-  location?: string | undefined;
-  from?: string | undefined;
-  to?: string | undefined;
-  minConfidence?: number | undefined;
+  plate?: string;
+  cameraId?: string;
+  from?: string;
+  to?: string;
 }
 
-export function filterDetections(filters: DetectionFilters): Detection[] {
-  return detections.filter((d) => {
-    if (filters.plate && !d.plate.toLowerCase().includes(filters.plate.trim().toLowerCase())) return false;
-    if (filters.vehicleType && filters.vehicleType !== "all" && d.vehicleType !== filters.vehicleType) return false;
-    if (filters.color && filters.color !== "all" && d.color !== filters.color) return false;
-    if (filters.cameraId && filters.cameraId !== "all" && d.cameraId !== filters.cameraId) return false;
-    if (filters.location && filters.location !== "all" && d.location !== filters.location) return false;
-    if (filters.from && d.timestamp < filters.from) return false;
-    if (filters.to && d.timestamp > filters.to) return false;
-    if (filters.minConfidence && d.confidence < filters.minConfidence) return false;
-    return true;
-  });
+export interface Detection {
+  id: string;
+  cameraId: string;
+  plate: string;
+  timestamp: string;
+  location: string;
+  confidence: number;
+  vehicleType: string;
+  color: string;
+  direction: string;
+  frameRef: string;
+}
+
+function mapDetection(row: any): Detection {
+  return {
+    id: row.id ?? "",
+    cameraId: row.camera_id ?? "",
+    plate: row.plate_number ?? "",
+    timestamp: row.detected_at ?? "",
+    location: "",
+    confidence: 0,
+    vehicleType: "Unknown",
+    color: "Unknown",
+    direction: "Unknown",
+    frameRef: "",
+  };
 }
 
 export const detectionService = {
-  async list(filters: DetectionFilters = {}): Promise<Detection[]> {
-    return respond(filterDetections(filters));
+  async list(filters: DetectionFilters = {}) {
+    let query = supabase
+      .from("detections")
+      .select(
+        "id, camera_id, vehicle_id, plate_number, detected_at"
+      );
+
+    // Plate search
+    if (filters.plate?.trim()) {
+      query = query.eq(
+        "plate_number",
+        filters.plate.trim().toUpperCase()
+      );
+    }
+
+    // Camera filter
+    if (filters.cameraId) {
+      query = query.eq(
+        "camera_id",
+        filters.cameraId
+      );
+    }
+
+    // Date/time filters
+    if (filters.from) {
+      query = query.gte(
+        "detected_at",
+        filters.from
+      );
+    }
+
+    if (filters.to) {
+      query = query.lte(
+        "detected_at",
+        filters.to
+      );
+    }
+
+    const { data, error } = await query.order(
+      "detected_at",
+      {
+        ascending: true,
+      }
+    );
+
+    if (error) {
+      console.error(
+        "SUPABASE DETECTION ERROR:",
+        error
+      );
+
+      throw error;
+    }
+
+    return (data ?? []).map(mapDetection);
   },
+
   async get(id: string) {
-    return respond(detections.find((d) => d.id === id));
+    const { data, error } = await supabase
+      .from("detections")
+      .select(
+        "id, camera_id, vehicle_id, plate_number, detected_at"
+      )
+      .eq("id", id)
+      .maybeSingle();
+
+    if (error) {
+      console.error(
+        "SUPABASE DETECTION ERROR:",
+        error
+      );
+
+      throw error;
+    }
+
+    return data
+      ? mapDetection(data)
+      : undefined;
   },
-  async byIds(ids: string[]) {
-    return respond(detections.filter((d) => ids.includes(d.id)));
+
+  async forCamera(
+    cameraId: string,
+    limit = 12
+  ) {
+    const { data, error } =
+      await supabase
+        .from("detections")
+        .select(
+          "id, camera_id, vehicle_id, plate_number, detected_at"
+        )
+        .eq("camera_id", cameraId)
+        .order("detected_at", {
+          ascending: false,
+        })
+        .limit(limit);
+
+    if (error) {
+      console.error(
+        "SUPABASE CAMERA DETECTION ERROR:",
+        error
+      );
+
+      throw error;
+    }
+
+    return (data ?? []).map(mapDetection);
   },
 };

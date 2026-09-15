@@ -1,6 +1,5 @@
-// POST /search
-import { cameras, PLATES, VEHICLE_COLORS, VEHICLE_TYPES, type Detection } from "@/data/mock";
-import { filterDetections } from "./detectionService";
+import { supabase } from "@/lib/supabase";
+import type { Detection } from "@/data/mock";
 import { respond } from "./api";
 
 export interface SearchResult {
@@ -14,58 +13,106 @@ export interface SearchResult {
   plates: string[];
 }
 
-/**
- * Free-text query parsing. Terms are extracted from the query and applied as
- * filters against the detection records — no query string is mapped directly
- * to a canned answer.
- */
 export function parseQuery(query: string) {
   const text = query.toLowerCase();
-  const plateMatch = query.toUpperCase().match(/GJ\s?\d{2}\s?[A-Z]{2}\s?\d{4}/);
-  const plate = plateMatch ? plateMatch[0].replace(/\s/g, "") : undefined;
-  const vehicleType = VEHICLE_TYPES.find((t) => text.includes(t.toLowerCase()));
-  const color = VEHICLE_COLORS.find((c) => text.includes(c.toLowerCase()));
-  const locationNames = Array.from(new Set(cameras.map((c) => c.location.split(" — ")[0]!)));
-  const locations = locationNames.filter((l) => text.includes(l.toLowerCase()));
-  return { plate, vehicleType, color, locations };
+
+  const plateMatch = query
+    .toUpperCase()
+    .match(/GJ\s?\d{2}\s?[A-Z]{2}\s?\d{4}/);
+
+  const plate = plateMatch
+    ? plateMatch[0].replace(/\s/g, "")
+    : undefined;
+
+  return { plate, vehicleType: undefined, color: undefined };
 }
 
 export const searchService = {
   async search(query: string): Promise<SearchResult> {
     const parsed = parseQuery(query);
     const interpretation: string[] = [];
-    if (parsed.plate) interpretation.push(`Plate filter: ${parsed.plate}`);
-    if (parsed.vehicleType) interpretation.push(`Vehicle type: ${parsed.vehicleType}`);
-    if (parsed.color) interpretation.push(`Colour: ${parsed.color}`);
-    if (parsed.locations.length) interpretation.push(`Locations: ${parsed.locations.join(", ")}`);
-    if (!interpretation.length) interpretation.push("No structured filters detected — showing all recorded detections");
 
-    let rows = filterDetections({
-      plate: parsed.plate,
-      vehicleType: parsed.vehicleType,
-      color: parsed.color,
-    });
-    if (parsed.locations.length) rows = rows.filter((d) => parsed.locations.includes(d.location));
-    rows = rows.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+    if (parsed.plate) {
+      interpretation.push(`Plate filter: ${parsed.plate}`);
+    }
+
+    if (!interpretation.length) {
+      interpretation.push("Showing all recorded vehicle detections");
+    }
+
+    let dbQuery = supabase
+      .from("detections")
+      .select(`
+        *,
+        cameras (
+          camera_code,
+          location,
+          latitude,
+          longitude
+        )
+      `)
+      .order("detected_at", { ascending: true });
+
+    if (parsed.plate) {
+      dbQuery = dbQuery.eq("vehicle_number", parsed.plate);
+    }
+
+    const { data, error } = await dbQuery;
+
+    if (error) {
+      console.error("Vehicle search error:", error);
+      throw error;
+    }
+
+    const rows = data ?? [];
+
+   const detections = rows.map((row: any) => ({
+  id: row.id ?? "",
+  cameraId: row.cameras?.camera_code ?? row.camera_id ?? "",
+  plate: row.vehicle_number ?? "",
+  timestamp: row.detected_at ?? "",
+  location: row.cameras?.location ?? "",
+  confidence: Number(row.confidence ?? 0),
+
+  vehicleType: row.vehicle_type ?? "Unknown",
+  color: row.color ?? "Unknown",
+  direction: row.direction ?? "Unknown",
+  frameRef: row.image_url ?? "",
+}));
 
     return respond({
       query,
       interpretation,
-      detections: rows,
-      count: rows.length,
-      timeRange: rows.length ? { from: rows[0]!.timestamp, to: rows[rows.length - 1]!.timestamp } : null,
-      locations: Array.from(new Set(rows.map((d) => d.location))),
-      cameras: Array.from(new Set(rows.map((d) => d.cameraId))),
-      plates: Array.from(new Set(rows.map((d) => d.plate))),
+      detections,
+      count: detections.length,
+
+      timeRange: detections.length
+        ? {
+            from: detections[0]!.timestamp,
+            to: detections[detections.length - 1]!.timestamp,
+          }
+        : null,
+
+      locations: Array.from(
+        new Set(detections.map((d) => d.location))
+      ),
+
+      cameras: Array.from(
+        new Set(detections.map((d) => d.cameraId))
+      ),
+
+      plates: Array.from(
+        new Set(detections.map((d) => d.plate))
+      ),
     });
   },
 
   suggestions(): string[] {
     return [
-      `Find ${PLATES[0]}`,
-      "Show white SUVs near Ahmedabad",
-      `Track vehicle ${PLATES[1]}`,
-      "Show all detections between Ahmedabad and Gandhinagar",
+      "Find GJ01AB1234",
+      "Find GJ05CD7788",
+      "Track vehicle GJ01AB1234",
+      "Show all vehicle detections",
     ];
   },
 };
