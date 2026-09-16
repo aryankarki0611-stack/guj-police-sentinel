@@ -1,60 +1,53 @@
 import os
 import time
 import threading
-from typing import Optional, Any, Dict, List
+import subprocess
+from typing import Any, Dict, List, Optional
 
 import cv2
 import requests
-from bs4 import BeautifulSoup
-
+from dotenv import load_dotenv
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
 try:
     from ultralytics import YOLO
 except ImportError:
     YOLO = None
 
-try:
-    from supabase import create_client
-except ImportError:
-    create_client = None
-
 
 # ============================================================
 # CONFIG
 # ============================================================
 
+load_dotenv()
+
 PORTAL_BASE_URL = os.getenv(
-    "SENTINEL_PORTAL_URL",
-    "https://live.sentinelgujarat.in",
+    "PORTAL_BASE_URL",
+    "https://cctv.corp8.cloud",
 ).rstrip("/")
 
-CATALOGUE_URL = os.getenv(
-    "SENTINEL_CATALOGUE_URL",
-    PORTAL_BASE_URL + "/api/ingest",
+SENTINEL_COOKIE = os.getenv(
+    "SENTINEL_COOKIE",
+    "",
+).strip()
+
+USER_AGENT = os.getenv(
+    "USER_AGENT",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/152.0.0.0 Safari/537.36",
 )
 
-LOGIN_URL = PORTAL_BASE_URL + "/auth/login"
-
-SENTINEL_EMAIL = os.getenv(
-    "SENTINEL_EMAIL",
-    "",
+CAMERA_LIMIT = int(
+    os.getenv("CAMERA_LIMIT", "30")
 )
 
-SENTINEL_PASSWORD = os.getenv(
-    "SENTINEL_PASSWORD",
-    "",
+DETECTION_INTERVAL = float(
+    os.getenv("DETECTION_INTERVAL", "5")
 )
 
-SUPABASE_URL = os.getenv(
-    "SUPABASE_URL",
-    "",
-)
-
-SUPABASE_SERVICE_ROLE_KEY = os.getenv(
-    "SUPABASE_SERVICE_ROLE_KEY",
-    "",
+BACKEND_PORT = int(
+    os.getenv("BACKEND_PORT", "8000")
 )
 
 YOLO_MODEL = os.getenv(
@@ -62,20 +55,49 @@ YOLO_MODEL = os.getenv(
     "yolo11n.pt",
 )
 
-CAMERA_LIMIT = int(
-    os.getenv("CAMERA_LIMIT", "1")
-)
-
-BACKEND_PORT = int(
-    os.getenv("BACKEND_PORT", "8000")
-)
-
 RECONNECT_INITIAL_SECONDS = 2
 RECONNECT_MAX_SECONDS = 30
 
-DETECTION_INTERVAL = int(
-    os.getenv("DETECTION_INTERVAL", "5")
-)
+
+# ============================================================
+# REAL CAMERA CATALOGUE
+# ============================================================
+
+CAMERAS = [
+    {"id": "cam01", "name": "01 Chiman bhai Bridge"},
+    {"id": "cam02", "name": "02 Janpath"},
+    {"id": "cam03", "name": "03 O.N.G.C. Office"},
+    {"id": "cam04", "name": "04 Paldi Circle"},
+    {"id": "cam05", "name": "05 Visat teen Rasta"},
+    {"id": "cam06", "name": "06 Timbavadi gate-Junagadh"},
+    {"id": "cam07", "name": "07 hero-showroom-gir-somnath"},
+    {"id": "cam08", "name": "08 majewadi-gate-junagadh"},
+    {"id": "cam09", "name": "09 new-bypass-near-by-circle-junagadh-2"},
+    {"id": "cam10", "name": "10 char-chowk-road-2-junagadh"},
+    {"id": "cam11", "name": "11 dolatpara-junagadh"},
+    {"id": "cam12", "name": "12 Tri Mandir Adalaj Tollnaka"},
+    {"id": "cam13", "name": "13 CN Vidhyalaya"},
+    {"id": "cam14", "name": "14 Delight RLVD"},
+    {"id": "cam15", "name": "15 Suvidha park"},
+    {"id": "cam16", "name": "16 Visat P2"},
+    {"id": "cam17", "name": "17 Rajkot Bus Port CCTV"},
+    {"id": "cam18", "name": "18 Rajkot CCTV"},
+    {
+        "id": "cam19",
+        "name": "19 KHAPARIA GRAM PANCHAYAT, TALUKA GANDEVI, DISTRICT NAVSARI",
+    },
+    {"id": "cam20", "name": "20 Mohanpura"},
+    {"id": "cam21", "name": "23 Patan Dethali Char Rasta"},
+    {"id": "cam22", "name": "28 BK Mervada tran Rasta"},
+    {"id": "cam23", "name": "30 kheram"},
+    {"id": "cam24", "name": "33 dehgam"},
+    {"id": "cam25", "name": "34 dhanori"},
+    {"id": "cam26", "name": "35 TANKAL"},
+    {"id": "cam27", "name": "36 bilimora"},
+    {"id": "cam28", "name": "37 bilimora"},
+    {"id": "cam29", "name": "38 bilimora"},
+    {"id": "cam30", "name": "Gandhidham Rambaugh p2"},
+]
 
 
 # ============================================================
@@ -83,16 +105,7 @@ DETECTION_INTERVAL = int(
 # ============================================================
 
 app = FastAPI(
-    title="SENTINEL Live Inference Backend",
-    version="1.1.0",
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    title="SENTINEL Live Inference Backend"
 )
 
 
@@ -100,94 +113,297 @@ app.add_middleware(
 # GLOBAL STATE
 # ============================================================
 
-session = requests.Session()
-
-session.headers.update(
-    {
-        "User-Agent": (
-            "Mozilla/5.0 "
-            "(Macintosh; Intel Mac OS X 10_15_7) "
-            "AppleWebKit/537.36 "
-            "(KHTML, like Gecko) "
-            "Chrome/140.0 Safari/537.36"
-        )
-    }
-)
-
-supabase = None
-yolo_model = None
-
-catalogue_cache: List[Dict[str, Any]] = []
-
 pipeline_running = False
 
 pipeline_lock = threading.Lock()
 
+processed_frames = 0
+successful_detections = 0
+
 last_detections: List[Dict[str, Any]] = []
 
-processed_frames = 0
+camera_status: Dict[str, Dict[str, Any]] = {}
 
-successful_detections = 0
+yolo_model = None
+
+
+# ============================================================
+# HTTP SESSION
+# ============================================================
+
+session = requests.Session()
+
+session.headers.update(
+    {
+        "User-Agent": USER_AGENT,
+        "Referer": f"{PORTAL_BASE_URL}/",
+        "Accept": "*/*",
+    }
+)
+
+
+# ============================================================
+# AUTHENTICATED COOKIE
+# ============================================================
+
+def setup_authenticated_session():
+
+    if not SENTINEL_COOKIE:
+
+        print(
+            "[AUTH] SENTINEL_COOKIE is not configured."
+        )
+
+        print(
+            "[AUTH] Add the browser sentinel cookie to .env."
+        )
+
+        return False
+
+    cookie_value = SENTINEL_COOKIE
+
+    # Allow either:
+    #
+    # sentinel=abc123
+    #
+    # or just:
+    #
+    # abc123
+    #
+    if "=" in cookie_value:
+
+        cookie_name, cookie_data = (
+            cookie_value.split("=", 1)
+        )
+
+    else:
+
+        cookie_name = "sentinel"
+        cookie_data = cookie_value
+
+    session.cookies.set(
+        cookie_name,
+        cookie_data,
+        domain="cctv.corp8.cloud",
+        path="/",
+    )
+
+    print(
+        "[AUTH] Authenticated cookie loaded."
+    )
+
+    print(
+        "[AUTH] Cookie name:",
+        cookie_name,
+    )
+
+    return True
+
+
+# ============================================================
+# CAMERA HELPERS
+# ============================================================
+
+def get_camera_id(
+    camera: Dict[str, Any],
+) -> Optional[str]:
+
+    value = camera.get("id")
+
+    if value is None:
+        return None
+
+    return str(value)
+
+
+def get_hls_url(
+    camera: Dict[str, Any],
+) -> Optional[str]:
+
+    camera_id = get_camera_id(camera)
+
+    if not camera_id:
+        return None
+
+    return (
+        f"{PORTAL_BASE_URL}"
+        f"/{camera_id}/index.m3u8"
+    )
+
+
+# ============================================================
+# TEST CAMERA ACCESS
+# ============================================================
+
+def test_camera_stream(
+    camera_id: str,
+) -> bool:
+
+    stream_url = (
+        f"{PORTAL_BASE_URL}"
+        f"/{camera_id}/index.m3u8"
+    )
+
+    print(
+        "[HLS] Testing:",
+        stream_url,
+    )
+
+    try:
+
+        response = session.get(
+            stream_url,
+            allow_redirects=False,
+            timeout=10,
+        )
+
+        print(
+            "[HLS] HTTP:",
+            response.status_code,
+        )
+
+        print(
+            "[HLS] URL:",
+            response.url,
+        )
+
+        if response.status_code in (301, 302, 303, 307, 308):
+
+            print(
+                "[HLS] Redirect:",
+                response.headers.get(
+                    "location"
+                ),
+            )
+
+            return False
+
+        if response.status_code != 200:
+
+            return False
+
+        content_type = (
+            response.headers
+            .get("content-type", "")
+            .lower()
+        )
+
+        print(
+            "[HLS] Content-Type:",
+            content_type,
+        )
+
+        return True
+
+    except Exception as exc:
+
+        print(
+            "[HLS] Test failed:",
+            exc,
+        )
+
+        return False
 
 
 # ============================================================
 # SUPABASE
 # ============================================================
 
+supabase = None
+
+
 def setup_supabase():
+
     global supabase
 
-    if not SUPABASE_URL:
-        print("[SUPABASE] SUPABASE_URL not configured.")
-        print("[SUPABASE] Database inserts are disabled.")
+    supabase_url = os.getenv(
+        "SUPABASE_URL",
+        "",
+    ).strip()
+
+    supabase_key = os.getenv(
+        "SUPABASE_KEY",
+        "",
+    ).strip()
+
+    if not supabase_url:
+
+        print(
+            "[SUPABASE] SUPABASE_URL not configured."
+        )
+
+        print(
+            "[SUPABASE] Database inserts are disabled."
+        )
+
         return
 
-    if not SUPABASE_SERVICE_ROLE_KEY:
-        print("[SUPABASE] SUPABASE_SERVICE_ROLE_KEY not configured.")
-        print("[SUPABASE] Database inserts are disabled.")
-        return
+    if not supabase_key:
 
-    if create_client is None:
-        print("[SUPABASE] supabase package is not installed.")
+        print(
+            "[SUPABASE] SUPABASE_KEY not configured."
+        )
+
+        print(
+            "[SUPABASE] Database inserts are disabled."
+        )
+
         return
 
     try:
+
+        from supabase import create_client
+
         supabase = create_client(
-            SUPABASE_URL,
-            SUPABASE_SERVICE_ROLE_KEY,
+            supabase_url,
+            supabase_key,
         )
 
-        print("[SUPABASE] Connected.")
+        print(
+            "[SUPABASE] Connected."
+        )
 
     except Exception as exc:
+
         supabase = None
+
         print(
             "[SUPABASE] Connection failed:",
             exc,
         )
 
 
+# ============================================================
+# SAVE DETECTION
+# ============================================================
+
 def save_detection_to_supabase(
     camera_id: str,
     detection: Dict[str, Any],
 ):
+
     if supabase is None:
         return
 
     try:
+
         row = {
             "camera_id": camera_id,
-            "object_class": detection.get("class"),
-            "confidence": detection.get("confidence"),
-            "bbox": detection.get("bbox"),
+            "object_class": detection.get(
+                "class"
+            ),
+            "confidence": detection.get(
+                "confidence"
+            ),
+            "bbox": detection.get(
+                "bbox"
+            ),
             "created_at": time.strftime(
                 "%Y-%m-%dT%H:%M:%SZ",
                 time.gmtime(),
             ),
         }
 
-        # Change "detections" if your Supabase table
-        # has a different name.
         response = (
             supabase
             .table("detections")
@@ -196,12 +412,14 @@ def save_detection_to_supabase(
         )
 
         if response.data:
+
             print(
                 "[SUPABASE] Detection inserted:",
                 detection.get("class"),
             )
 
     except Exception as exc:
+
         print(
             "[SUPABASE] Insert failed:",
             exc,
@@ -213,24 +431,34 @@ def save_detection_to_supabase(
 # ============================================================
 
 def setup_yolo():
+
     global yolo_model
 
     if YOLO is None:
-        print("[YOLO] ultralytics is not installed.")
-        print("[YOLO] YOLO detection is disabled.")
+
+        print(
+            "[YOLO] ultralytics is not installed."
+        )
+
         return
 
     try:
+
         print(
             "[YOLO] Loading model:",
             YOLO_MODEL,
         )
 
-        yolo_model = YOLO(YOLO_MODEL)
+        yolo_model = YOLO(
+            YOLO_MODEL
+        )
 
-        print("[YOLO] Model loaded successfully.")
+        print(
+            "[YOLO] Model loaded successfully."
+        )
 
     except Exception as exc:
+
         yolo_model = None
 
         print(
@@ -239,11 +467,15 @@ def setup_yolo():
         )
 
 
-def run_yolo(frame) -> List[Dict[str, Any]]:
+def run_yolo(
+    frame,
+) -> List[Dict[str, Any]]:
+
     if yolo_model is None:
         return []
 
     try:
+
         results = yolo_model(
             frame,
             verbose=False,
@@ -253,464 +485,50 @@ def run_yolo(frame) -> List[Dict[str, Any]]:
 
         for result in results:
 
-            boxes = result.boxes
-
-            if boxes is None:
+            if result.boxes is None:
                 continue
 
-            for box in boxes:
+            for box in result.boxes:
 
-                try:
-                    xyxy = box.xyxy[0].tolist()
+                confidence = float(
+                    box.conf[0]
+                )
 
-                    confidence = float(
-                        box.conf[0]
+                class_id = int(
+                    box.cls[0]
+                )
+
+                class_name = (
+                    result.names
+                    .get(
+                        class_id,
+                        str(class_id),
                     )
+                )
 
-                    class_id = int(
-                        box.cls[0]
-                    )
+                coordinates = (
+                    box.xyxy[0]
+                    .tolist()
+                )
 
-                    class_name = str(
-                        result.names[class_id]
-                    )
-
-                    detections.append(
-                        {
-                            "class": class_name,
-                            "confidence": confidence,
-                            "bbox": xyxy,
-                        }
-                    )
-
-                except Exception:
-                    continue
+                detections.append(
+                    {
+                        "class": class_name,
+                        "confidence": confidence,
+                        "bbox": coordinates,
+                    }
+                )
 
         return detections
 
     except Exception as exc:
+
         print(
-            "[YOLO] Detection error:",
+            "[YOLO] Inference failed:",
             exc,
         )
 
         return []
-
-
-# ============================================================
-# PORTAL LOGIN
-# ============================================================
-
-def login_to_portal() -> bool:
-    """
-    Login to Sentinel Gujarat portal.
-
-    The portal currently redirects the login page to
-    cctv.corp8.cloud and returns HTTP 302 + a "sentinel"
-    session cookie after a successful login.
-    """
-
-    if not SENTINEL_EMAIL:
-        print("[AUTH] SENTINEL_EMAIL is not configured.")
-        return False
-
-    if not SENTINEL_PASSWORD:
-        print("[AUTH] SENTINEL_PASSWORD is not configured.")
-        return False
-
-    try:
-        print("[AUTH] Opening login page...")
-
-        # Follow the portal's redirect to the real login host.
-        login_page = session.get(
-            LOGIN_URL,
-            timeout=20,
-            allow_redirects=True,
-        )
-
-        print(
-            "[AUTH] Login page:",
-            login_page.status_code,
-            login_page.url,
-        )
-
-        if login_page.status_code >= 400:
-            print("[AUTH] Could not open login page.")
-            return False
-
-        # ----------------------------------------------------
-        # Extract any hidden form fields.
-        # ----------------------------------------------------
-
-        login_data = {}
-
-        try:
-            soup = BeautifulSoup(
-                login_page.text,
-                "html.parser",
-            )
-
-            form = soup.find("form")
-
-            if form is not None:
-                for input_tag in form.find_all("input"):
-                    name = input_tag.get("name")
-                    value = input_tag.get("value", "")
-
-                    if name:
-                        login_data[name] = value
-
-        except Exception as exc:
-            print(
-                "[AUTH] Could not parse login form:",
-                exc,
-            )
-
-        # Add the credentials supplied through environment variables.
-        login_data["email"] = SENTINEL_EMAIL
-        login_data["password"] = SENTINEL_PASSWORD
-
-        print("[AUTH] Submitting login...")
-
-        # POST to the actual login URL after redirects.
-        response = session.post(
-            login_page.url,
-            data=login_data,
-            timeout=20,
-            allow_redirects=False,
-        )
-
-        print(
-            "[AUTH] Login response:",
-            response.status_code,
-            response.url,
-        )
-
-        if response.status_code >= 400:
-            print(
-                "[AUTH] Login request failed:",
-                response.status_code,
-            )
-            return False
-
-        # ----------------------------------------------------
-        # SUCCESS:
-        # The portal returns HTTP 302, Location: / and a
-        # HttpOnly cookie named "sentinel".
-        # ----------------------------------------------------
-
-        sentinel_cookie = session.cookies.get("sentinel")
-
-        if response.status_code in (301, 302, 303, 307, 308):
-            location = response.headers.get("Location", "")
-
-            print("[AUTH] Redirect:", location or "(none)")
-
-            if sentinel_cookie:
-                print("[AUTH] Sentinel session cookie received.")
-                print("[AUTH] Login successful.")
-                return True
-
-            print(
-                "[AUTH] Redirect received, but no Sentinel session cookie."
-            )
-            return False
-
-        # Some deployments may return the authenticated page directly.
-        if sentinel_cookie:
-            print("[AUTH] Sentinel session cookie received.")
-            print("[AUTH] Login successful.")
-            return True
-
-        page_text = response.text.lower()
-
-        if (
-            "sign in" in page_text
-            and "access password" in page_text
-        ):
-            print("[AUTH] Login was NOT accepted.")
-            print("[AUTH] The portal returned the sign-in page.")
-            return False
-
-        print("[AUTH] Login response was unexpected.")
-        return False
-
-    except requests.RequestException as exc:
-        print("[AUTH] Network error:", exc)
-        return False
-
-    except Exception as exc:
-        print("[AUTH] Login error:", exc)
-        return False
-
-
-# ============================================================
-# CATALOGUE
-# ============================================================
-
-def fetch_catalogue() -> List[Dict[str, Any]]:
-    global catalogue_cache
-
-    try:
-
-        print(
-            "[CATALOGUE] GET",
-            CATALOGUE_URL,
-        )
-
-        response = session.get(
-            CATALOGUE_URL,
-            timeout=20,
-            allow_redirects=True,
-        )
-
-        print(
-            "[CATALOGUE] HTTP",
-            response.status_code,
-            "->",
-            response.url,
-        )
-
-        if response.status_code != 200:
-
-            print(
-                "[CATALOGUE] HTTP error:",
-                response.status_code,
-            )
-
-            return []
-
-        content_type = response.headers.get(
-            "content-type",
-            "",
-        ).lower()
-
-        # ----------------------------------------------------
-        # HTML means authentication page or another portal page
-        # ----------------------------------------------------
-
-        if "text/html" in content_type:
-
-            print(
-                "[CATALOGUE] Server returned HTML, not JSON."
-            )
-
-            if (
-                "sign in" in response.text.lower()
-                or "/auth/login" in response.url.lower()
-            ):
-
-                print(
-                    "[CATALOGUE] Authentication is required."
-                )
-
-            return []
-
-        # ----------------------------------------------------
-        # Parse JSON
-        # ----------------------------------------------------
-
-        try:
-
-            data = response.json()
-
-        except Exception as exc:
-
-            print(
-                "[CATALOGUE] JSON parsing failed:",
-                exc,
-            )
-
-            print(
-                "[CATALOGUE] Response preview:"
-            )
-
-            print(
-                response.text[:1000]
-            )
-
-            return []
-
-        # ----------------------------------------------------
-        # Normalize camera list
-        # ----------------------------------------------------
-
-        cameras = []
-
-        if isinstance(data, list):
-
-            cameras = data
-
-        elif isinstance(data, dict):
-
-            for key in [
-                "cameras",
-                "streams",
-                "data",
-                "results",
-            ]:
-
-                value = data.get(key)
-
-                if isinstance(value, list):
-
-                    cameras = value
-
-                    break
-
-        if not isinstance(cameras, list):
-
-            cameras = []
-
-        # Keep dictionaries only.
-        cameras = [
-            camera
-            for camera in cameras
-            if isinstance(camera, dict)
-        ]
-
-        catalogue_cache = cameras
-
-        print(
-            "[CATALOGUE] Cameras available:",
-            len(cameras),
-        )
-
-        # ----------------------------------------------------
-        # Print camera information
-        # ----------------------------------------------------
-
-        for camera in cameras[:CAMERA_LIMIT]:
-
-            camera_id = get_camera_id(
-                camera
-            )
-
-            print(
-                "------------------------------------------"
-            )
-
-            print(
-                "[CAMERA]",
-                camera_id or "unknown",
-            )
-
-            print(
-                " location:",
-                camera.get(
-                    "location",
-                    "unknown",
-                ),
-            )
-
-            print(
-                " name:",
-                camera.get(
-                    "name",
-                    "unknown",
-                ),
-            )
-
-            print(
-                " live:",
-                camera.get(
-                    "live",
-                    camera.get(
-                        "online",
-                        "unknown",
-                    ),
-                ),
-            )
-
-            rtsp = get_rtsp_url(
-                camera
-            )
-
-            print(
-                " RTSP:",
-                "FOUND" if rtsp else "NOT FOUND",
-            )
-
-        return cameras
-
-    except requests.RequestException as exc:
-
-        print(
-            "[CATALOGUE] Request failed:",
-            exc,
-        )
-
-        return []
-
-    except Exception as exc:
-
-        print(
-            "[CATALOGUE] Failed:",
-            exc,
-        )
-
-        return []
-
-
-# ============================================================
-# CAMERA HELPERS
-# ============================================================
-
-def get_camera_id(
-    camera: Dict[str, Any]
-) -> Optional[str]:
-
-    for key in [
-        "id",
-        "camera_id",
-        "cameraId",
-        "cameraID",
-        "uuid",
-        "name",
-    ]:
-
-        value = camera.get(key)
-
-        if value is not None:
-
-            return str(value)
-
-    return None
-
-
-def get_rtsp_url(
-    camera: Dict[str, Any]
-) -> Optional[str]:
-    """Return an RTSP or HLS stream URL for a camera."""
-
-    possible_keys = [
-        "rtsp", "rtsp_url", "rtspUrl", "rtsp_uri", "rtspUri",
-        "stream_url", "streamUrl", "url", "hls", "hls_url",
-        "hlsUrl", "m3u8",
-    ]
-
-    for key in possible_keys:
-        value = camera.get(key)
-        if isinstance(value, str):
-            lower = value.lower()
-            if lower.startswith("rtsp://") or ".m3u8" in lower:
-                return value
-
-    for parent_key in ["urls", "streams", "stream", "source"]:
-        nested = camera.get(parent_key)
-        if isinstance(nested, dict):
-            for key in possible_keys:
-                value = nested.get(key)
-                if isinstance(value, str):
-                    lower = value.lower()
-                    if lower.startswith("rtsp://") or ".m3u8" in lower:
-                        return value
-
-    camera_id = get_camera_id(camera)
-    if camera_id and PORTAL_BASE_URL:
-        return f"{PORTAL_BASE_URL}/{camera_id}/index.m3u8"
-
-    return None
 
 
 # ============================================================
@@ -718,364 +536,342 @@ def get_rtsp_url(
 # ============================================================
 
 def camera_worker(
-    camera: Dict[str, Any]
+    camera: Dict[str, Any],
 ):
 
     global processed_frames
     global successful_detections
     global last_detections
 
-    camera_id = get_camera_id(camera)
+    camera_id = get_camera_id(
+        camera
+    )
 
-    stream_url = get_rtsp_url(camera)
+    stream_url = get_hls_url(
+        camera
+    )
 
     if not camera_id:
-        print("[PIPELINE] Camera has no ID.")
+
+        print(
+            "[PIPELINE] Camera has no ID."
+        )
+
         return
 
     if not stream_url:
+
         print(
             "[PIPELINE]",
             camera_id,
             "has no stream URL."
         )
-        print("[PIPELINE] Skipping this camera.")
+
         return
 
-    print("==========================================")
-    print("[PIPELINE] Starting camera:", camera_id)
-    print("==========================================")
+    print(
+        "=========================================="
+    )
 
-    reconnect_delay = RECONNECT_INITIAL_SECONDS
+    print(
+        "[PIPELINE] Starting camera:",
+        camera_id,
+    )
+
+    print(
+        "[PIPELINE] Stream:",
+        stream_url,
+    )
+
+    print(
+        "=========================================="
+    )
+
+    camera_status[
+        camera_id
+    ] = {
+        "id": camera_id,
+        "name": camera.get(
+            "name",
+            camera_id,
+        ),
+        "status": "connecting",
+        "stream_url": stream_url,
+        "frames": 0,
+        "detections": 0,
+    }
+
+    reconnect_delay = (
+        RECONNECT_INITIAL_SECONDS
+    )
+
     frame_counter = 0
     last_detection_time = 0
 
     while pipeline_running:
 
-        print("[STREAM] Connecting:", camera_id)
-
-        # ----------------------------------------------------
-        # AUTHENTICATED HLS
-        # ----------------------------------------------------
-
-        cookie_header = "; ".join(
-            f"{cookie.name}={cookie.value}"
-            for cookie in session.cookies
+        print(
+            "[STREAM] Connecting:",
+            camera_id,
         )
 
-        user_agent = session.headers.get(
-            "User-Agent",
-            "Mozilla/5.0"
+        # ----------------------------------------------------
+        # COOKIE
+        # ----------------------------------------------------
+
+        cookie_header = (
+            "; ".join(
+                f"{cookie.name}={cookie.value}"
+                for cookie in session.cookies
+            )
         )
 
-        if ".m3u8" in stream_url.lower():
+        # ----------------------------------------------------
+        # HLS HEADERS
+        # ----------------------------------------------------
 
-            print(
-                "[HLS] Opening authenticated stream:",
-                camera_id
-            )
+        headers = (
+            f"Cookie: {cookie_header}\r\n"
+            f"User-Agent: {USER_AGENT}\r\n"
+            f"Referer: {PORTAL_BASE_URL}/\r\n"
+            f"Origin: {PORTAL_BASE_URL}\r\n"
+        )
 
-            # FFmpeg receives the same authentication information
-            # that the Python requests session received after login.
-            headers = (
-                f"Cookie: {cookie_header}\r\n"
-                f"User-Agent: {user_agent}\r\n"
-                f"Referer: {PORTAL_BASE_URL}/\r\n"
-            )
+        # ----------------------------------------------------
+        # FFMPEG
+        # ----------------------------------------------------
 
-            import subprocess
+        ffmpeg_cmd = [
 
-            ffmpeg_cmd = [
-                "/opt/homebrew/bin/ffmpeg",
+            "/opt/homebrew/bin/ffmpeg",
 
-                "-hide_banner",
-                "-loglevel", "error",
+            "-hide_banner",
 
-                # HTTP headers required by the CCTV server.
-                "-headers", headers,
+            "-loglevel",
+            "warning",
 
-                # HLS input.
-                "-i", stream_url,
+            # HTTP headers
+            "-headers",
+            headers,
 
-                # Decode video frames.
-                "-f", "rawvideo",
-                "-pix_fmt", "bgr24",
+            # HLS
+            "-i",
+            stream_url,
 
-                # Fixed frame size so Python knows exactly
-                # how many bytes make one frame.
-                "-vf", "scale=640:360",
+            # Raw BGR frames
+            "-f",
+            "rawvideo",
 
-                "pipe:1",
-            ]
+            "-pix_fmt",
+            "bgr24",
 
-            try:
+            # Resize
+            "-vf",
+            "scale=640:360",
 
-                ffmpeg_process = subprocess.Popen(
+            "pipe:1",
+        ]
+
+        try:
+
+            ffmpeg_process = (
+                subprocess.Popen(
                     ffmpeg_cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     bufsize=10**8,
                 )
-
-            except FileNotFoundError:
-
-                print(
-                    "[HLS] FFmpeg not found."
-                )
-
-                print(
-                    "[HLS] Make sure this works:"
-                )
-
-                print(
-                    "       ffmpeg -version"
-                )
-
-                return
-
-            frame_width = 640
-            frame_height = 360
-            frame_size = (
-                frame_width
-                * frame_height
-                * 3
             )
+
+        except FileNotFoundError:
 
             print(
-                "[HLS] FFmpeg started:",
-                camera_id
+                "[HLS] FFmpeg not found."
             )
 
-            reconnect_delay = (
-                RECONNECT_INITIAL_SECONDS
+            return
+
+        frame_width = 640
+        frame_height = 360
+
+        frame_size = (
+            frame_width
+            * frame_height
+            * 3
+        )
+
+        print(
+            "[HLS] FFmpeg started:",
+            camera_id,
+        )
+
+        camera_status[
+            camera_id
+        ]["status"] = "connected"
+
+        connected = False
+
+        reconnect_delay = (
+            RECONNECT_INITIAL_SECONDS
+        )
+
+        while pipeline_running:
+
+            raw_frame = (
+                ffmpeg_process
+                .stdout
+                .read(frame_size)
             )
 
-            connected = False
+            if (
+                not raw_frame
+                or len(raw_frame)
+                != frame_size
+            ):
 
-            while pipeline_running:
+                break
 
-                raw_frame = (
-                    ffmpeg_process.stdout.read(
-                        frame_size
-                    )
-                )
+            # ------------------------------------------------
+            # RAW BGR → NUMPY
+            # ------------------------------------------------
 
-                if len(raw_frame) != frame_size:
-
-                    break
-
-                frame = cv2.imdecode(
-                    __import__("numpy").frombuffer(
-                        raw_frame,
-                        dtype=__import__("numpy").uint8,
-                    ),
-                    cv2.IMREAD_COLOR,
-                )
-
-                # The rawvideo stream is already BGR,
-                # so use numpy directly instead of imdecode.
-                frame = __import__("numpy").frombuffer(
-                    raw_frame,
-                    dtype=__import__("numpy").uint8,
-                ).reshape(
-                    (frame_height, frame_width, 3)
-                )
-
-                if not connected:
-
-                    print(
-                        "[STREAM] CONNECTED:",
-                        camera_id
-                    )
-
-                    connected = True
-
-                frame_counter += 1
-                processed_frames += 1
-
-                now = time.time()
-
-                if (
-                    now - last_detection_time
-                    >= DETECTION_INTERVAL
-                ):
-
-                    last_detection_time = now
-
-                    detections = run_yolo(
-                        frame
-                    )
-
-                    last_detections = detections
-
-                    if detections:
-
-                        successful_detections += len(
-                            detections
-                        )
-
-                        print(
-                            "[INFERENCE]",
-                            camera_id,
-                            "| frame=",
-                            frame_counter,
-                            "| detections=",
-                            len(detections),
-                        )
-
-                        for detection in detections:
-
-                            print(
-                                "   ",
-                                detection["class"],
-                                f"{detection['confidence']:.2f}",
-                            )
-
-                            save_detection_to_supabase(
-                                camera_id,
-                                detection,
-                            )
-
-                    else:
-
-                        print(
-                            "[INFERENCE]",
-                            camera_id,
-                            "| frame=",
-                            frame_counter,
-                            "| detections=0",
-                        )
-
-            # Stop FFmpeg when the stream ends.
             try:
-                ffmpeg_process.terminate()
-                ffmpeg_process.wait(timeout=3)
-            except Exception:
-                try:
-                    ffmpeg_process.kill()
-                except Exception:
-                    pass
 
-            print(
-                "[STREAM] Disconnected:",
-                camera_id
-            )
+                import numpy as np
 
-        else:
-
-            # ------------------------------------------------
-            # RTSP FALLBACK
-            # ------------------------------------------------
-
-            print(
-                "[RTSP] Opening:",
-                camera_id
-            )
-
-            os.environ[
-                "OPENCV_FFMPEG_CAPTURE_OPTIONS"
-            ] = "rtsp_transport;tcp"
-
-            cap = cv2.VideoCapture(
-                stream_url,
-                cv2.CAP_FFMPEG,
-            )
-
-            if not cap.isOpened():
-
-                print(
-                    "[RTSP] Could not open:",
-                    camera_id
+                frame = (
+                    np.frombuffer(
+                        raw_frame,
+                        dtype=np.uint8,
+                    )
+                    .reshape(
+                        (
+                            frame_height,
+                            frame_width,
+                            3,
+                        )
+                    )
                 )
 
-                cap.release()
+            except Exception as exc:
 
-            else:
+                print(
+                    "[FRAME] Decode failed:",
+                    exc,
+                )
+
+                break
+
+            if not connected:
 
                 print(
                     "[STREAM] CONNECTED:",
+                    camera_id,
+                )
+
+                connected = True
+
+            frame_counter += 1
+            processed_frames += 1
+
+            camera_status[
+                camera_id
+            ]["frames"] = frame_counter
+
+            # ------------------------------------------------
+            # DETECTION INTERVAL
+            # ------------------------------------------------
+
+            now = time.time()
+
+            if (
+                now - last_detection_time
+                >= DETECTION_INTERVAL
+            ):
+
+                last_detection_time = now
+
+                detections = run_yolo(
+                    frame
+                )
+
+                last_detections = (
+                    detections
+                )
+
+                camera_status[
                     camera_id
+                ]["detections"] += len(
+                    detections
                 )
 
-                reconnect_delay = (
-                    RECONNECT_INITIAL_SECONDS
-                )
+                if detections:
 
-                while pipeline_running:
+                    successful_detections += (
+                        len(detections)
+                    )
 
-                    ok, frame = cap.read()
+                    print(
+                        "[INFERENCE]",
+                        camera_id,
+                        "| frame=",
+                        frame_counter,
+                        "| detections=",
+                        len(detections),
+                    )
 
-                    if not ok:
+                    for detection in detections:
 
                         print(
-                            "[STREAM] Frame read failed:",
-                            camera_id
+                            "   ",
+                            detection[
+                                "class"
+                            ],
+                            f"{detection['confidence']:.2f}",
                         )
 
-                        break
-
-                    frame_counter += 1
-                    processed_frames += 1
-
-                    now = time.time()
-
-                    if (
-                        now - last_detection_time
-                        >= DETECTION_INTERVAL
-                    ):
-
-                        last_detection_time = now
-
-                        detections = run_yolo(
-                            frame
+                        save_detection_to_supabase(
+                            camera_id,
+                            detection,
                         )
 
-                        last_detections = detections
+                else:
 
-                        if detections:
+                    print(
+                        "[INFERENCE]",
+                        camera_id,
+                        "| frame=",
+                        frame_counter,
+                        "| detections=0",
+                    )
 
-                            successful_detections += len(
-                                detections
-                            )
+        # ----------------------------------------------------
+        # STOP FFMPEG
+        # ----------------------------------------------------
 
-                            print(
-                                "[INFERENCE]",
-                                camera_id,
-                                "| frame=",
-                                frame_counter,
-                                "| detections=",
-                                len(detections),
-                            )
+        try:
 
-                            for detection in detections:
+            ffmpeg_process.terminate()
 
-                                print(
-                                    "   ",
-                                    detection["class"],
-                                    f"{detection['confidence']:.2f}",
-                                )
+            ffmpeg_process.wait(
+                timeout=3
+            )
 
-                                save_detection_to_supabase(
-                                    camera_id,
-                                    detection,
-                                )
+        except Exception:
 
-                        else:
+            try:
+                ffmpeg_process.kill()
+            except Exception:
+                pass
 
-                            print(
-                                "[INFERENCE]",
-                                camera_id,
-                                "| frame=",
-                                frame_counter,
-                                "| detections=0",
-                            )
+        camera_status[
+            camera_id
+        ]["status"] = "disconnected"
 
-                cap.release()
-
-                print(
-                    "[STREAM] Disconnected:",
-                    camera_id
-                )
+        print(
+            "[STREAM] Disconnected:",
+            camera_id,
+        )
 
         # ----------------------------------------------------
         # RECONNECT
@@ -1086,7 +882,7 @@ def camera_worker(
             print(
                 "[STREAM] Reconnecting in",
                 reconnect_delay,
-                "seconds..."
+                "seconds...",
             )
 
             time.sleep(
@@ -1097,6 +893,8 @@ def camera_worker(
                 reconnect_delay * 2,
                 RECONNECT_MAX_SECONDS,
             )
+
+
 # ============================================================
 # PIPELINE
 # ============================================================
@@ -1133,25 +931,28 @@ def start_pipeline():
         )
 
         print(
-            "[CONFIG] Catalogue:",
-            CATALOGUE_URL,
-        )
-
-        print(
             "[CONFIG] Camera limit:",
             CAMERA_LIMIT,
         )
 
+        print(
+            "[CONFIG] Detection interval:",
+            DETECTION_INTERVAL,
+            "seconds",
+        )
+
         # ----------------------------------------------------
-        # Authenticate
+        # AUTHENTICATION
         # ----------------------------------------------------
 
-        authenticated = login_to_portal()
+        authenticated = (
+            setup_authenticated_session()
+        )
 
         if not authenticated:
 
             print(
-                "[PIPELINE] Portal authentication failed."
+                "[PIPELINE] No authenticated session."
             )
 
             print(
@@ -1161,25 +962,43 @@ def start_pipeline():
             return
 
         # ----------------------------------------------------
-        # Fetch camera catalogue
+        # TEST FIRST CAMERA
         # ----------------------------------------------------
 
-        cameras = fetch_catalogue()
+        print(
+            "[PIPELINE] Testing cam02..."
+        )
 
-        if not cameras:
+        if test_camera_stream(
+            "cam02"
+        ):
 
             print(
-                "[PIPELINE] No cameras received."
+                "[PIPELINE] cam02 access confirmed."
+            )
+
+        else:
+
+            print(
+                "[PIPELINE] cam02 test failed."
+            )
+
+            print(
+                "[PIPELINE] Check whether the browser cookie is still valid."
             )
 
             return
 
-        selected_cameras = cameras[
+        # ----------------------------------------------------
+        # SELECT CAMERAS
+        # ----------------------------------------------------
+
+        selected_cameras = CAMERAS[
             :CAMERA_LIMIT
         ]
 
         # ----------------------------------------------------
-        # Start workers
+        # RUN
         # ----------------------------------------------------
 
         pipeline_running = True
@@ -1228,9 +1047,16 @@ def root():
             "SENTINEL Live Inference Backend"
         ),
         "status": "running",
-        "catalogue": "/api/ingest",
-        "health": "/health",
         "pipeline_running": pipeline_running,
+        "camera_count": len(CAMERAS),
+        "endpoints": {
+            "health": "/health",
+            "cameras": "/api/ingest",
+            "detections": "/api/detections",
+            "camera_status": "/api/camera-status",
+            "start": "/pipeline/start",
+            "stop": "/pipeline/stop",
+        },
     }
 
 
@@ -1240,14 +1066,15 @@ def health():
     return {
         "status": "ok",
         "pipeline_running": pipeline_running,
-        "camera_count": len(
-            catalogue_cache
-        ),
+        "camera_count": len(CAMERAS),
         "yolo": (
             yolo_model is not None
         ),
         "supabase": (
             supabase is not None
+        ),
+        "authenticated_cookie": bool(
+            SENTINEL_COOKIE
         ),
         "processed_frames": processed_frames,
         "detections": successful_detections,
@@ -1258,10 +1085,16 @@ def health():
 def api_ingest():
 
     return {
-        "count": len(
-            catalogue_cache
-        ),
-        "cameras": catalogue_cache,
+        "count": len(CAMERAS),
+        "cameras": [
+            {
+                **camera,
+                "stream_url": get_hls_url(
+                    camera
+                ),
+            }
+            for camera in CAMERAS
+        ],
     }
 
 
@@ -1269,10 +1102,17 @@ def api_ingest():
 def api_detections():
 
     return {
-        "count": len(
-            last_detections
-        ),
+        "count": len(last_detections),
         "detections": last_detections,
+    }
+
+
+@app.get("/api/camera-status")
+def api_camera_status():
+
+    return {
+        "count": len(camera_status),
+        "cameras": camera_status,
     }
 
 
@@ -1313,33 +1153,14 @@ def startup():
     setup_supabase()
     setup_yolo()
 
-    if (
-        SENTINEL_EMAIL
-        and SENTINEL_PASSWORD
-    ):
+    print(
+        "[STARTUP] Backend is running."
+    )
 
-        print(
-            "[STARTUP] Portal credentials detected."
-        )
-
-        threading.Thread(
-            target=start_pipeline,
-            daemon=True,
-        ).start()
-
-    else:
-
-        print(
-            "[STARTUP] Portal credentials not configured."
-        )
-
-        print(
-            "[STARTUP] Backend is running."
-        )
-
-        print(
-            "[STARTUP] Live camera pipeline is disabled."
-        )
+    print(
+        "[STARTUP] Use POST /pipeline/start "
+        "to start the live camera pipeline."
+    )
 
 
 @app.on_event("shutdown")

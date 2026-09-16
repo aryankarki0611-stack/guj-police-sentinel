@@ -18,66 +18,108 @@ export interface Detection {
   color: string;
   direction: string;
   frameRef: string;
+  latitude?: number;
+  longitude?: number;
+  imageUrl?: string;
+  snapshotUrl?: string;
+  vehicleId?: string;
+  vehicleNumber?: string;
 }
 
 function mapDetection(row: any): Detection {
-  return {
+  const detection: Detection = {
     id: row.id ?? "",
     cameraId: row.camera_id ?? "",
-    plate: row.plate_number ?? "",
+    plate: row.plate_number ?? row.vehicle_number ?? "",
     timestamp: row.detected_at ?? "",
-    location: "",
-    confidence: 0,
-    vehicleType: "Unknown",
+    location:
+      row.latitude != null && row.longitude != null
+        ? `${row.latitude}, ${row.longitude}`
+        : "",
+    confidence: Number(row.confidence ?? 0),
+    vehicleType: row.vehicle_type ?? "Unknown",
     color: "Unknown",
     direction: "Unknown",
-    frameRef: "",
+    frameRef: row.image_url ?? row.snapshot_url ?? "",
   };
+
+  // Only add optional properties when they actually exist.
+  if (row.latitude != null) {
+    detection.latitude = Number(row.latitude);
+  }
+
+  if (row.longitude != null) {
+    detection.longitude = Number(row.longitude);
+  }
+
+  if (row.image_url) {
+    detection.imageUrl = row.image_url;
+  }
+
+  if (row.snapshot_url) {
+    detection.snapshotUrl = row.snapshot_url;
+  }
+
+  if (row.vehicle_id) {
+    detection.vehicleId = row.vehicle_id;
+  }
+
+  if (row.vehicle_number) {
+    detection.vehicleNumber = row.vehicle_number;
+  }
+
+  return detection;
 }
+
+const detectionSelect = `
+  id,
+  camera_id,
+  vehicle_id,
+  plate_number,
+  detected_at,
+  confidence,
+  vehicle_type,
+  snapshot_url,
+  created_at,
+  vehicle_number,
+  latitude,
+  longitude,
+  image_url
+`;
 
 export const detectionService = {
   async list(filters: DetectionFilters = {}) {
     let query = supabase
       .from("detections")
-      .select(
-        "id, camera_id, vehicle_id, plate_number, detected_at"
-      );
+      .select(detectionSelect);
 
-    // Plate search
     if (filters.plate?.trim()) {
-      query = query.eq(
-        "plate_number",
-        filters.plate.trim().toUpperCase()
+      const plate = filters.plate
+        .trim()
+        .toUpperCase()
+        .replace(/\s+/g, "");
+
+      query = query.or(
+        `plate_number.eq.${plate},vehicle_number.eq.${plate}`
       );
     }
 
-    // Camera filter
     if (filters.cameraId) {
-      query = query.eq(
-        "camera_id",
-        filters.cameraId
-      );
+      query = query.eq("camera_id", filters.cameraId);
     }
 
-    // Date/time filters
     if (filters.from) {
-      query = query.gte(
-        "detected_at",
-        filters.from
-      );
+      query = query.gte("detected_at", filters.from);
     }
 
     if (filters.to) {
-      query = query.lte(
-        "detected_at",
-        filters.to
-      );
+      query = query.lte("detected_at", filters.to);
     }
 
     const { data, error } = await query.order(
       "detected_at",
       {
-        ascending: true,
+        ascending: false,
       }
     );
 
@@ -96,9 +138,7 @@ export const detectionService = {
   async get(id: string) {
     const { data, error } = await supabase
       .from("detections")
-      .select(
-        "id, camera_id, vehicle_id, plate_number, detected_at"
-      )
+      .select(detectionSelect)
       .eq("id", id)
       .maybeSingle();
 
@@ -123,9 +163,7 @@ export const detectionService = {
     const { data, error } =
       await supabase
         .from("detections")
-        .select(
-          "id, camera_id, vehicle_id, plate_number, detected_at"
-        )
+        .select(detectionSelect)
         .eq("camera_id", cameraId)
         .order("detected_at", {
           ascending: false,
