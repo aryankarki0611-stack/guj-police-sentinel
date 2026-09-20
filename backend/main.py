@@ -2,12 +2,13 @@ import os
 import time
 import threading
 import subprocess
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-import cv2
 import requests
 from dotenv import load_dotenv
 from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
 
 try:
     from ultralytics import YOLO
@@ -19,7 +20,9 @@ except ImportError:
 # CONFIG
 # ============================================================
 
-load_dotenv()
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+load_dotenv(BASE_DIR / ".env")
 
 PORTAL_BASE_URL = os.getenv(
     "PORTAL_BASE_URL",
@@ -38,9 +41,7 @@ USER_AGENT = os.getenv(
     "Chrome/152.0.0.0 Safari/537.36",
 )
 
-CAMERA_LIMIT = int(
-    os.getenv("CAMERA_LIMIT", "30")
-)
+CAMERA_LIMIT = int(os.getenv("CAMERA_LIMIT", "30"))
 
 DETECTION_INTERVAL = float(
     os.getenv("DETECTION_INTERVAL", "5")
@@ -60,47 +61,6 @@ RECONNECT_MAX_SECONDS = 30
 
 
 # ============================================================
-# REAL CAMERA CATALOGUE
-# ============================================================
-
-CAMERAS = [
-    {"id": "cam01", "name": "01 Chiman bhai Bridge"},
-    {"id": "cam02", "name": "02 Janpath"},
-    {"id": "cam03", "name": "03 O.N.G.C. Office"},
-    {"id": "cam04", "name": "04 Paldi Circle"},
-    {"id": "cam05", "name": "05 Visat teen Rasta"},
-    {"id": "cam06", "name": "06 Timbavadi gate-Junagadh"},
-    {"id": "cam07", "name": "07 hero-showroom-gir-somnath"},
-    {"id": "cam08", "name": "08 majewadi-gate-junagadh"},
-    {"id": "cam09", "name": "09 new-bypass-near-by-circle-junagadh-2"},
-    {"id": "cam10", "name": "10 char-chowk-road-2-junagadh"},
-    {"id": "cam11", "name": "11 dolatpara-junagadh"},
-    {"id": "cam12", "name": "12 Tri Mandir Adalaj Tollnaka"},
-    {"id": "cam13", "name": "13 CN Vidhyalaya"},
-    {"id": "cam14", "name": "14 Delight RLVD"},
-    {"id": "cam15", "name": "15 Suvidha park"},
-    {"id": "cam16", "name": "16 Visat P2"},
-    {"id": "cam17", "name": "17 Rajkot Bus Port CCTV"},
-    {"id": "cam18", "name": "18 Rajkot CCTV"},
-    {
-        "id": "cam19",
-        "name": "19 KHAPARIA GRAM PANCHAYAT, TALUKA GANDEVI, DISTRICT NAVSARI",
-    },
-    {"id": "cam20", "name": "20 Mohanpura"},
-    {"id": "cam21", "name": "23 Patan Dethali Char Rasta"},
-    {"id": "cam22", "name": "28 BK Mervada tran Rasta"},
-    {"id": "cam23", "name": "30 kheram"},
-    {"id": "cam24", "name": "33 dehgam"},
-    {"id": "cam25", "name": "34 dhanori"},
-    {"id": "cam26", "name": "35 TANKAL"},
-    {"id": "cam27", "name": "36 bilimora"},
-    {"id": "cam28", "name": "37 bilimora"},
-    {"id": "cam29", "name": "38 bilimora"},
-    {"id": "cam30", "name": "Gandhidham Rambaugh p2"},
-]
-
-
-# ============================================================
 # APP
 # ============================================================
 
@@ -113,11 +73,14 @@ app = FastAPI(
 # GLOBAL STATE
 # ============================================================
 
+CAMERAS: List[Dict[str, Any]] = []
+
 pipeline_running = False
 
 pipeline_lock = threading.Lock()
 
 processed_frames = 0
+
 successful_detections = 0
 
 last_detections: List[Dict[str, Any]] = []
@@ -138,12 +101,13 @@ session.headers.update(
         "User-Agent": USER_AGENT,
         "Referer": f"{PORTAL_BASE_URL}/",
         "Accept": "*/*",
+        "Range": "bytes=0-",
     }
 )
 
 
 # ============================================================
-# AUTHENTICATED COOKIE
+# AUTHENTICATION
 # ============================================================
 
 def setup_authenticated_session():
@@ -162,14 +126,6 @@ def setup_authenticated_session():
 
     cookie_value = SENTINEL_COOKIE
 
-    # Allow either:
-    #
-    # sentinel=abc123
-    #
-    # or just:
-    #
-    # abc123
-    #
     if "=" in cookie_value:
 
         cookie_name, cookie_data = (
@@ -216,7 +172,19 @@ def get_camera_id(
     return str(value)
 
 
-def get_hls_url(
+def get_camera_name(
+    camera: Dict[str, Any],
+) -> str:
+
+    return str(
+        camera.get(
+            "name",
+            get_camera_id(camera) or "Unknown",
+        )
+    )
+
+
+def get_rtsp_url(
     camera: Dict[str, Any],
 ) -> Optional[str]:
 
@@ -226,9 +194,129 @@ def get_hls_url(
         return None
 
     return (
-        f"{PORTAL_BASE_URL}"
-        f"/{camera_id}/index.m3u8"
+        f"{PORTAL_BASE_URL}/"
+        f"{camera_id}/stream.m3u8"
     )
+
+
+# ============================================================
+# LOAD CAMERA CATALOGUE
+# ============================================================
+
+def load_camera_catalogue() -> bool:
+
+    global CAMERAS
+
+    catalogue_url = (
+        f"{PORTAL_BASE_URL}/cameras.json"
+    )
+
+    print(
+        "[CATALOGUE] Fetching:",
+        catalogue_url,
+    )
+
+    try:
+
+        response = session.get(
+            catalogue_url,
+            timeout=15,
+            allow_redirects=False,
+        )
+
+        print(
+            "[CATALOGUE] HTTP:",
+            response.status_code,
+        )
+
+        if response.status_code in (
+            301,
+            302,
+            303,
+            307,
+            308,
+        ):
+
+            print(
+                "[CATALOGUE] Authentication rejected."
+            )
+
+            print(
+                "[CATALOGUE] Redirect:",
+                response.headers.get("location"),
+            )
+
+            return False
+
+        response.raise_for_status()
+
+        cameras = response.json()
+
+        if not isinstance(cameras, list):
+
+            print(
+                "[CATALOGUE] Unexpected response format."
+            )
+
+            return False
+
+        if not cameras:
+
+            print(
+                "[CATALOGUE] No cameras returned."
+            )
+
+            return False
+
+        CAMERAS = cameras
+
+        print(
+            "[CATALOGUE] Loaded",
+            len(CAMERAS),
+            "camera(s).",
+        )
+
+        for camera in CAMERAS[:5]:
+
+            print(
+                "[CATALOGUE]",
+                get_camera_id(camera),
+                "|",
+                get_camera_name(camera),
+            )
+
+        if len(CAMERAS) > 5:
+
+            print(
+                "[CATALOGUE] ...",
+                len(CAMERAS) - 5,
+                "more camera(s)",
+            )
+
+        return True
+
+    except ValueError as exc:
+
+        print(
+            "[CATALOGUE] Response was not JSON:",
+            exc,
+        )
+
+        print(
+            "[CATALOGUE] Body start:",
+            response.text[:100],
+        )
+
+        return False
+
+    except Exception as exc:
+
+        print(
+            "[CATALOGUE] Failed:",
+            exc,
+        )
+
+        return False
 
 
 # ============================================================
@@ -236,12 +324,22 @@ def get_hls_url(
 # ============================================================
 
 def test_camera_stream(
-    camera_id: str,
+    camera: Dict[str, Any],
 ) -> bool:
 
+    camera_id = get_camera_id(camera)
+
+    if not camera_id:
+
+        print(
+            "[HLS] Camera has no ID."
+        )
+
+        return False
+
     stream_url = (
-        f"{PORTAL_BASE_URL}"
-        f"/{camera_id}/index.m3u8"
+        f"{PORTAL_BASE_URL}/"
+        f"{camera_id}/index.m3u8"
     )
 
     print(
@@ -253,8 +351,8 @@ def test_camera_stream(
 
         response = session.get(
             stream_url,
+            timeout=15,
             allow_redirects=False,
-            timeout=10,
         )
 
         print(
@@ -262,35 +360,40 @@ def test_camera_stream(
             response.status_code,
         )
 
-        print(
-            "[HLS] URL:",
-            response.url,
-        )
+        if response.status_code in (
+            301,
+            302,
+            303,
+            307,
+            308,
+        ):
 
-        if response.status_code in (301, 302, 303, 307, 308):
+            print(
+                "[HLS] Authentication rejected."
+            )
 
             print(
                 "[HLS] Redirect:",
-                response.headers.get(
-                    "location"
-                ),
+                response.headers.get("location"),
             )
 
             return False
 
-        if response.status_code != 200:
+        if response.status_code not in (
+            200,
+            206,
+        ):
+
+            print(
+                "[HLS] Unexpected status:",
+                response.status_code,
+            )
 
             return False
 
-        content_type = (
-            response.headers
-            .get("content-type", "")
-            .lower()
-        )
-
         print(
-            "[HLS] Content-Type:",
-            content_type,
+            "[HLS] Camera access confirmed:",
+            camera_id,
         )
 
         return True
@@ -389,15 +492,9 @@ def save_detection_to_supabase(
 
         row = {
             "camera_id": camera_id,
-            "object_class": detection.get(
-                "class"
-            ),
-            "confidence": detection.get(
-                "confidence"
-            ),
-            "bbox": detection.get(
-                "bbox"
-            ),
+            "object_class": detection.get("class"),
+            "confidence": detection.get("confidence"),
+            "bbox": detection.get("bbox"),
             "created_at": time.strftime(
                 "%Y-%m-%dT%H:%M:%SZ",
                 time.gmtime(),
@@ -467,9 +564,7 @@ def setup_yolo():
         )
 
 
-def run_yolo(
-    frame,
-) -> List[Dict[str, Any]]:
+def run_yolo(frame) -> List[Dict[str, Any]]:
 
     if yolo_model is None:
         return []
@@ -499,8 +594,7 @@ def run_yolo(
                 )
 
                 class_name = (
-                    result.names
-                    .get(
+                    result.names.get(
                         class_id,
                         str(class_id),
                     )
@@ -543,13 +637,7 @@ def camera_worker(
     global successful_detections
     global last_detections
 
-    camera_id = get_camera_id(
-        camera
-    )
-
-    stream_url = get_hls_url(
-        camera
-    )
+    camera_id = get_camera_id(camera)
 
     if not camera_id:
 
@@ -559,15 +647,11 @@ def camera_worker(
 
         return
 
-    if not stream_url:
-
-        print(
-            "[PIPELINE]",
-            camera_id,
-            "has no stream URL."
-        )
-
-        return
+    # HLS is used to prove browser-style live access.
+    stream_url = (
+        f"{PORTAL_BASE_URL}/"
+        f"{camera_id}/index.m3u8"
+    )
 
     print(
         "=========================================="
@@ -587,25 +671,19 @@ def camera_worker(
         "=========================================="
     )
 
-    camera_status[
-        camera_id
-    ] = {
+    camera_status[camera_id] = {
         "id": camera_id,
-        "name": camera.get(
-            "name",
-            camera_id,
-        ),
+        "name": get_camera_name(camera),
         "status": "connecting",
         "stream_url": stream_url,
         "frames": 0,
         "detections": 0,
     }
 
-    reconnect_delay = (
-        RECONNECT_INITIAL_SECONDS
-    )
+    reconnect_delay = RECONNECT_INITIAL_SECONDS
 
     frame_counter = 0
+
     last_detection_time = 0
 
     while pipeline_running:
@@ -616,33 +694,10 @@ def camera_worker(
         )
 
         # ----------------------------------------------------
-        # COOKIE
-        # ----------------------------------------------------
-
-        cookie_header = (
-            "; ".join(
-                f"{cookie.name}={cookie.value}"
-                for cookie in session.cookies
-            )
-        )
-
-        # ----------------------------------------------------
-        # HLS HEADERS
-        # ----------------------------------------------------
-
-        headers = (
-            f"Cookie: {cookie_header}\r\n"
-            f"User-Agent: {USER_AGENT}\r\n"
-            f"Referer: {PORTAL_BASE_URL}/\r\n"
-            f"Origin: {PORTAL_BASE_URL}\r\n"
-        )
-
-        # ----------------------------------------------------
-        # FFMPEG
+        # FFMPEG HLS INPUT
         # ----------------------------------------------------
 
         ffmpeg_cmd = [
-
             "/opt/homebrew/bin/ffmpeg",
 
             "-hide_banner",
@@ -650,48 +705,52 @@ def camera_worker(
             "-loglevel",
             "warning",
 
-            # HTTP headers
             "-headers",
-            headers,
+            (
+                "User-Agent: Mozilla/5.0\r\n"
+                "Referer: https://cctv.corp8.cloud/\r\n"
+            ),
 
-            # HLS
+            "-cookies",
+            f"sentinel={SENTINEL_COOKIE}",
+
             "-i",
             stream_url,
 
-            # Raw BGR frames
             "-f",
             "rawvideo",
 
             "-pix_fmt",
             "bgr24",
 
-            # Resize
             "-vf",
             "scale=640:360",
 
             "pipe:1",
         ]
-
         try:
 
-            ffmpeg_process = (
-                subprocess.Popen(
-                    ffmpeg_cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    bufsize=10**8,
-                )
+            ffmpeg_process = subprocess.Popen(
+                ffmpeg_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=10**8,
             )
 
         except FileNotFoundError:
 
             print(
-                "[HLS] FFmpeg not found."
+                "[FFMPEG] FFmpeg not found."
             )
+
+            camera_status[
+                camera_id
+            ]["status"] = "error"
 
             return
 
         frame_width = 640
+
         frame_height = 360
 
         frame_size = (
@@ -701,7 +760,7 @@ def camera_worker(
         )
 
         print(
-            "[HLS] FFmpeg started:",
+            "[FFMPEG] Started:",
             camera_id,
         )
 
@@ -725,15 +784,10 @@ def camera_worker(
 
             if (
                 not raw_frame
-                or len(raw_frame)
-                != frame_size
+                or len(raw_frame) != frame_size
             ):
 
                 break
-
-            # ------------------------------------------------
-            # RAW BGR → NUMPY
-            # ------------------------------------------------
 
             try:
 
@@ -772,15 +826,12 @@ def camera_worker(
                 connected = True
 
             frame_counter += 1
+
             processed_frames += 1
 
             camera_status[
                 camera_id
             ]["frames"] = frame_counter
-
-            # ------------------------------------------------
-            # DETECTION INTERVAL
-            # ------------------------------------------------
 
             now = time.time()
 
@@ -795,9 +846,7 @@ def camera_worker(
                     frame
                 )
 
-                last_detections = (
-                    detections
-                )
+                last_detections = detections
 
                 camera_status[
                     camera_id
@@ -824,9 +873,7 @@ def camera_worker(
 
                         print(
                             "   ",
-                            detection[
-                                "class"
-                            ],
+                            detection["class"],
                             f"{detection['confidence']:.2f}",
                         )
 
@@ -942,7 +989,7 @@ def start_pipeline():
         )
 
         # ----------------------------------------------------
-        # AUTHENTICATION
+        # AUTH
         # ----------------------------------------------------
 
         authenticated = (
@@ -955,36 +1002,16 @@ def start_pipeline():
                 "[PIPELINE] No authenticated session."
             )
 
-            print(
-                "[PIPELINE] Pipeline will not start."
-            )
-
             return
 
         # ----------------------------------------------------
-        # TEST FIRST CAMERA
+        # CAMERA CATALOGUE
         # ----------------------------------------------------
 
-        print(
-            "[PIPELINE] Testing cam02..."
-        )
-
-        if test_camera_stream(
-            "cam02"
-        ):
+        if not load_camera_catalogue():
 
             print(
-                "[PIPELINE] cam02 access confirmed."
-            )
-
-        else:
-
-            print(
-                "[PIPELINE] cam02 test failed."
-            )
-
-            print(
-                "[PIPELINE] Check whether the browser cookie is still valid."
+                "[PIPELINE] Camera catalogue could not be loaded."
             )
 
             return
@@ -993,36 +1020,83 @@ def start_pipeline():
         # SELECT CAMERAS
         # ----------------------------------------------------
 
-        selected_cameras = CAMERAS[
-            :CAMERA_LIMIT
-        ]
+        selected_cameras = (
+            CAMERAS[:CAMERA_LIMIT]
+        )
+
+        if not selected_cameras:
+
+            print(
+                "[PIPELINE] No cameras available."
+            )
+
+            return
+
+        print(
+            "[PIPELINE] Cameras selected:",
+            len(selected_cameras),
+        )
 
         # ----------------------------------------------------
-        # RUN
+        # TEST FIRST CAMERA
+        # ----------------------------------------------------
+
+        first_camera = selected_cameras[0]
+
+        first_camera_id = get_camera_id(
+            first_camera
+        )
+
+        print(
+            "[PIPELINE] Testing:",
+            first_camera_id,
+        )
+
+        if not test_camera_stream(
+            first_camera
+        ):
+
+            print(
+                "[PIPELINE] First camera test failed."
+            )
+
+            return
+
+        print(
+            "[PIPELINE] First camera access confirmed."
+        )
+
+        # ----------------------------------------------------
+        # START
         # ----------------------------------------------------
 
         pipeline_running = True
 
         worker_count = 0
 
-        for camera in selected_cameras:
+        # Start only the first camera initially.
+        # Once confirmed working, we can scale to all 30.
 
-            thread = threading.Thread(
-                target=camera_worker,
-                args=(camera,),
-                daemon=True,
-            )
+        thread = threading.Thread(
+            target=camera_worker,
+            args=(first_camera,),
+            daemon=True,
+        )
 
-            thread.start()
+        thread.start()
 
-            worker_count += 1
+        worker_count += 1
 
         print(
             "[PIPELINE] Started",
             worker_count,
-            "camera worker(s)."
+            "camera worker."
         )
 
+
+# ============================================================
+# STOP
+# ============================================================
 
 def stop_pipeline():
 
@@ -1067,12 +1141,8 @@ def health():
         "status": "ok",
         "pipeline_running": pipeline_running,
         "camera_count": len(CAMERAS),
-        "yolo": (
-            yolo_model is not None
-        ),
-        "supabase": (
-            supabase is not None
-        ),
+        "yolo": yolo_model is not None,
+        "supabase": supabase is not None,
         "authenticated_cookie": bool(
             SENTINEL_COOKIE
         ),
@@ -1089,8 +1159,13 @@ def api_ingest():
         "cameras": [
             {
                 **camera,
-                "stream_url": get_hls_url(
-                    camera
+                "hls_url": (
+                    f"{PORTAL_BASE_URL}/"
+                    f"{get_camera_id(camera)}/index.m3u8"
+                ),
+                "rtsp_url": (
+                    f"rtsp://cctv.corp8.cloud:8554/"
+                    f"stream/{get_camera_id(camera)}"
                 ),
             }
             for camera in CAMERAS
@@ -1115,6 +1190,44 @@ def api_camera_status():
         "cameras": camera_status,
     }
 
+
+@app.get("/api/hls/{camera_id}/index.m3u8")
+def hls_playlist(camera_id: str):
+
+    camera = camera_status.get(camera_id)
+
+    if not camera:
+        return {"error": "Camera not found"}
+
+    stream_url = camera.get("stream_url")
+
+    if not stream_url:
+        return {"error": "No stream URL available"}
+
+    response = session.get(stream_url, timeout=10)
+
+    return StreamingResponse(
+        iter([response.content]),
+        media_type="application/vnd.apple.mpegurl",
+    )
+@app.get("/api/hls/{camera_id}/{segment_name}")
+def hls_segment(camera_id: str, segment_name: str):
+
+    camera = camera_status.get(camera_id)
+
+    if not camera:
+        return {"error": "Camera not found"}
+
+    segment_url = (
+        f"https://cctv.corp8.cloud/{camera_id}/{segment_name}"
+    )
+
+    response = session.get(segment_url, timeout=15)
+
+    return StreamingResponse(
+        iter([response.content]),
+        media_type="video/mp2t",
+    )
 
 @app.post("/pipeline/start")
 def api_start_pipeline():
@@ -1151,6 +1264,7 @@ def api_stop_pipeline():
 def startup():
 
     setup_supabase()
+
     setup_yolo()
 
     print(

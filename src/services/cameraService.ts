@@ -90,12 +90,26 @@ export const cameraService = {
   },
 
   async feed(id: string) {
-    return respond({
-      cameraId: id,
-      frameUrl: `simulated://${id}/live`,
-      fps: 25,
-    });
-  },
+  const response = await fetch(
+    `http://127.0.0.1:8000/api/camera-status`
+  );
+
+  if (!response.ok) {
+    throw new Error("Failed to fetch camera status");
+  }
+
+  const data = await response.json();
+  const camera = data.cameras?.[id];
+
+  return respond({
+    cameraId: id,
+    frameUrl: camera?.stream_url ?? "",
+    fps: 25,
+    status: camera?.status ?? "offline",
+    frames: camera?.frames ?? 0,
+    detections: camera?.detections ?? 0,
+  });
+},
 
   async detectionsFor(id: string, limit = 12) {
     const { data, error } = await supabase
